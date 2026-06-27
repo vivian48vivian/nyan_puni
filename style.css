@@ -706,7 +706,9 @@ button {
 }
 
 .result-panel,
-.reward-panel {
+.reward-panel,
+.pause-panel,
+.confirm-exit-panel {
   width: 100%;
   display: grid;
   justify-items: center;
@@ -715,7 +717,9 @@ button {
 
 .reward-panel.hidden,
 .result-panel.hidden,
-.skill-select-panel.hidden {
+.skill-select-panel.hidden,
+.pause-panel.hidden,
+.confirm-exit-panel.hidden {
   display: none;
 }
 
@@ -866,6 +870,51 @@ button {
   font-weight: 900;
   background: linear-gradient(120deg, var(--theme-accent-soft), var(--theme-accent));
   box-shadow: 0 8px 20px rgba(130, 164, 174, 0.24);
+}
+
+.pause-menu-button {
+  width: 172px;
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 999px;
+  color: #6c7d8d;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  background: rgba(238, 247, 250, 0.9);
+  box-shadow:
+    0 8px 18px rgba(112, 151, 170, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.pause-menu-button.primary {
+  color: #fff;
+  background: linear-gradient(120deg, var(--theme-accent-soft), var(--theme-accent));
+  box-shadow: 0 8px 20px rgba(130, 164, 174, 0.24);
+}
+
+.confirm-title {
+  font-size: 22px;
+}
+
+.confirm-message {
+  margin: 0;
+  color: #748392;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.confirm-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.confirm-actions .pause-menu-button {
+  width: 100%;
 }
 
 @media (max-height: 680px) {

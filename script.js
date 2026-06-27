@@ -31,6 +31,8 @@ const rewardSubtitle = document.getElementById("rewardSubtitle");
 const rewardOptions = document.getElementById("rewardOptions");
 const skillSelectPanel = document.getElementById("skillSelectPanel");
 const skillOptions = document.getElementById("skillOptions");
+const pausePanel = document.getElementById("pausePanel");
+const confirmExitPanel = document.getElementById("confirmExitPanel");
 const overlayTitle = document.getElementById("overlayTitle");
 const recordText = document.getElementById("recordText");
 const finalStageText = document.getElementById("finalStageText");
@@ -38,6 +40,10 @@ const finalScoreText = document.getElementById("finalScoreText");
 const bestScoreText = document.getElementById("bestScoreText");
 const bestStageText = document.getElementById("bestStageText");
 const retryButton = document.getElementById("retryButton");
+const resumeButton = document.getElementById("resumeButton");
+const titleExitButton = document.getElementById("titleExitButton");
+const confirmExitYesButton = document.getElementById("confirmExitYesButton");
+const confirmExitNoButton = document.getElementById("confirmExitNoButton");
 const playButton = document.getElementById("playButton");
 const settingsButton = document.getElementById("settingsButton");
 const howToButton = document.getElementById("howToButton");
@@ -50,11 +56,11 @@ const titleModalBody = document.getElementById("titleModalBody");
 const titleModalClose = document.getElementById("titleModalClose");
 
 const COLORS = [
-  { fill: "#ffadc5", shade: "#f58cab", eye: "#7a5262" },
-  { fill: "#a7e6d8", shade: "#79d6c4", eye: "#3d6b66" },
-  { fill: "#ffd986", shade: "#f7bf58", eye: "#765f37" },
-  { fill: "#b9c9ff", shade: "#91a6f4", eye: "#4e5c87" },
-  { fill: "#d8b9ff", shade: "#bd94ed", eye: "#66517f" }
+  { fill: "#ffadc5", shade: "#f58cab", eye: "#20243a" },
+  { fill: "#a7e6d8", shade: "#79d6c4", eye: "#20243a" },
+  { fill: "#ffd986", shade: "#f7bf58", eye: "#20243a" },
+  { fill: "#b9c9ff", shade: "#91a6f4", eye: "#20243a" },
+  { fill: "#d8b9ff", shade: "#bd94ed", eye: "#20243a" }
 ];
 
 const AUDIO_ASSETS = {
@@ -438,6 +444,28 @@ class AudioManager {
     }, duration * 1000);
   }
 
+  pauseGameAudio() {
+    const context = this.ensure();
+    if (!context || !this.bgmGain) return;
+    window.clearTimeout(this.bgmDuckTimer);
+    this.bgmGain.gain.cancelScheduledValues(context.currentTime);
+    this.bgmGain.gain.setTargetAtTime(this.bgmVolume * 0.42, context.currentTime, 0.08);
+  }
+
+  resumeGameAudio() {
+    const context = this.ensure();
+    if (!context || !this.bgmGain) return;
+    window.clearTimeout(this.bgmDuckTimer);
+    this.bgmGain.gain.cancelScheduledValues(context.currentTime);
+    this.bgmGain.gain.setTargetAtTime(this.bgmVolume, context.currentTime, 0.08);
+  }
+
+  returnToTitleAudio() {
+    this.resumeGameAudio();
+    this.stopFeverLayer(0.25);
+    this.stopBgm(0.55);
+  }
+
   silenceBriefly(duration = 0.2) {
     const context = this.ensure();
     if (!context || !this.masterGain) return;
@@ -610,6 +638,16 @@ class AudioManager {
 const audio = new AudioManager(AUDIO_ASSETS);
 
 const GAME_VERSION = "0.9";
+const GAME_STATE = {
+  TITLE: "title",
+  SKILL_SELECT: "skill_select",
+  READY: "ready",
+  PLAYING: "playing",
+  PAUSED: "paused",
+  EXIT_CONFIRM: "exit_confirm",
+  REWARD: "reward",
+  GAME_OVER: "game_over"
+};
 
 const GAME_CONFIG = {
   baseSeconds: 60,
@@ -958,6 +996,8 @@ let resultScoreDisplay = 0;
 let resultScoreTarget = 0;
 let resultAnimating = false;
 let lastTime = 0;
+let gameState = GAME_STATE.TITLE;
+let prePauseState = GAME_STATE.PLAYING;
 let paused = false;
 let gameOver = false;
 let selected = [];
@@ -1012,6 +1052,8 @@ function init(showTitle = true) {
   resultScoreDisplay = 0;
   resultScoreTarget = 0;
   resultAnimating = false;
+  gameState = showTitle ? GAME_STATE.TITLE : GAME_STATE.SKILL_SELECT;
+  prePauseState = GAME_STATE.PLAYING;
   paused = false;
   gameOver = false;
   selected = [];
@@ -1033,6 +1075,8 @@ function init(showTitle = true) {
   resultPanel.classList.add("hidden");
   rewardPanel.classList.add("hidden");
   skillSelectPanel.classList.toggle("hidden", showTitle);
+  pausePanel.classList.add("hidden");
+  confirmExitPanel.classList.add("hidden");
   rewardOptions.innerHTML = "";
   skillOptions.innerHTML = "";
   recordText.classList.remove("show");
@@ -1062,6 +1106,35 @@ function init(showTitle = true) {
   }
   lastTime = performance.now();
   animationId = requestAnimationFrame(loop);
+}
+
+function setGameState(nextState) {
+  gameState = nextState;
+  paused = nextState === GAME_STATE.PAUSED || nextState === GAME_STATE.EXIT_CONFIRM;
+  gameOver = nextState === GAME_STATE.GAME_OVER;
+  skillSelecting = nextState === GAME_STATE.SKILL_SELECT;
+  rewardChoosing = nextState === GAME_STATE.REWARD;
+  pauseButton.textContent = paused ? "▶" : "II";
+  updateSkillUI();
+}
+
+function hideOverlayPanels() {
+  resultPanel.classList.add("hidden");
+  rewardPanel.classList.add("hidden");
+  skillSelectPanel.classList.add("hidden");
+  pausePanel.classList.add("hidden");
+  confirmExitPanel.classList.add("hidden");
+}
+
+function clearActiveInput() {
+  selected = [];
+  selectedColor = null;
+  pointer = null;
+  lastPointer = null;
+}
+
+function isPauseAllowed() {
+  return gameState === GAME_STATE.PLAYING || gameState === GAME_STATE.READY;
 }
 
 function resizeCanvas() {
@@ -1170,8 +1243,10 @@ function createFloatingPiece(options) {
     wobble: random(0, Math.PI * 2),
     scale: 1,
     alpha: 1,
+    press: 0,
     hitFlash: 0,
     age: 0,
+    removeLife: 0,
     lifespan: options.variant === "golden" ? random(GAME_CONFIG.specialPuni.golden.lifespanMin, GAME_CONFIG.specialPuni.golden.lifespanMax) : Infinity,
     removing: false
   };
@@ -1252,6 +1327,7 @@ function updateEffectsOnly(dt) {
 function showTitleScreen() {
   titleActive = true;
   titleStarting = false;
+  gameState = GAME_STATE.TITLE;
   titleScreen.classList.remove("hidden", "starting");
   resizeTitleCanvas();
   overlay.classList.add("hidden");
@@ -1396,9 +1472,10 @@ function drawTitleBackground() {
 
 function drawTitlePuni(p) {
   const palette = COLORS[p.color];
+  const breathe = Math.sin(p.wobble * 1.15) * 0.025;
   const bounceScale = 1 + Math.sin(p.bounce * Math.PI) * 0.13;
-  const squashX = 1 + p.squash * 0.26;
-  const squashY = 1 - p.squash * 0.18;
+  const squashX = 1 + p.squash * 0.24 + breathe;
+  const squashY = 1 - p.squash * 0.17 - breathe * 0.7;
 
   titleCtx.save();
   titleCtx.translate(p.x, p.y);
@@ -1407,12 +1484,19 @@ function drawTitlePuni(p) {
 
   const gradient = titleCtx.createRadialGradient(-p.r * 0.35, -p.r * 0.45, p.r * 0.2, 0, 0, p.r * 1.15);
   gradient.addColorStop(0, "#ffffff");
-  gradient.addColorStop(0.18, palette.fill);
+  gradient.addColorStop(0.2, palette.fill);
+  gradient.addColorStop(0.68, palette.fill);
   gradient.addColorStop(1, palette.shade);
+
+  drawPuniEars(titleCtx, p.r, palette, p.wobble, p.squash, 0);
+
   titleCtx.fillStyle = gradient;
-  titleCtx.beginPath();
-  titleCtx.ellipse(0, 0, p.r * 1.04, p.r * 0.95, Math.sin(p.wobble) * 0.08, 0, Math.PI * 2);
+  drawPuniBodyPath(titleCtx, p.r * 1.04, p.r * 0.95, Math.sin(p.wobble) * 0.08);
   titleCtx.fill();
+
+  titleCtx.strokeStyle = "rgba(255, 255, 255, 0.72)";
+  titleCtx.lineWidth = Math.max(1.4, p.r * 0.075);
+  titleCtx.stroke();
 
   titleCtx.globalAlpha = 0.7;
   titleCtx.fillStyle = "#ffffff";
@@ -1423,15 +1507,9 @@ function drawTitlePuni(p) {
   titleCtx.globalAlpha = 1;
   titleCtx.fillStyle = palette.eye;
   titleCtx.beginPath();
-  titleCtx.ellipse(-p.r * 0.28, -p.r * 0.04, p.r * 0.08, p.r * 0.12, 0, 0, Math.PI * 2);
-  titleCtx.ellipse(p.r * 0.28, -p.r * 0.04, p.r * 0.08, p.r * 0.12, 0, 0, Math.PI * 2);
+  titleCtx.arc(-p.r * 0.28, -p.r * 0.04, p.r * 0.085, 0, Math.PI * 2);
+  titleCtx.arc(p.r * 0.28, -p.r * 0.04, p.r * 0.085, 0, Math.PI * 2);
   titleCtx.fill();
-  titleCtx.strokeStyle = palette.eye;
-  titleCtx.lineWidth = Math.max(1.2, p.r * 0.06);
-  titleCtx.lineCap = "round";
-  titleCtx.beginPath();
-  titleCtx.arc(0, p.r * 0.14, p.r * 0.16, 0.15 * Math.PI, 0.85 * Math.PI);
-  titleCtx.stroke();
   titleCtx.restore();
 }
 
@@ -1484,12 +1562,16 @@ function updatePuni(dt) {
     if (p.hitFlash > 0) {
       p.hitFlash = Math.max(0, p.hitFlash - dt * 3.2);
     }
+    if (p.press > 0) {
+      p.press = Math.max(0, p.press - dt * 8.5);
+    }
 
     if (p.variant === "golden" && p.age > p.lifespan) {
       p.removing = true;
     }
 
     if (p.removing) {
+      p.removeLife += dt;
       p.scale = Math.max(0, p.scale - dt * 5.4);
       p.alpha = Math.max(0, p.alpha - dt * 4.8);
       continue;
@@ -1964,12 +2046,19 @@ function drawPuni(p, isSelected, isParent) {
   const selectedScale = isParent ? getParentScale() : (isSelected ? 1.08 : 1);
   const scale = p.scale * selectedScale;
   const radius = p.r * scale;
-  const wobbleX = Math.sin(p.wobble) * radius * 0.06;
-  const wobbleY = Math.cos(p.wobble * 1.15) * radius * 0.05;
+  const breathe = p.removing ? 0 : Math.sin(p.wobble * 1.15) * 0.025;
+  const press = Math.max(p.press || 0, isSelected ? 0.18 : 0);
+  const popHop = p.removing ? Math.max(0, 1 - (p.removeLife || 0) / 0.12) : 0;
+  const squashX = 1 + press * 0.18 + breathe;
+  const squashY = 1 - press * 0.14 - breathe * 0.7;
+  const wobbleX = Math.sin(p.wobble) * radius * 0.035;
+  const wobbleY = Math.cos(p.wobble * 1.15) * radius * 0.03;
+  const bodyRotation = Math.sin(p.wobble) * 0.055;
 
   ctx.save();
   ctx.globalAlpha = p.alpha;
   ctx.translate(p.x, p.y);
+  ctx.scale(squashX, squashY);
 
   if (isParent && selected.length >= 3) {
     drawParentRing(radius, palette);
@@ -1987,30 +2076,32 @@ function drawPuni(p, isSelected, isParent) {
 
   const bodyGradient = createPuniBodyGradient(p, palette, radius, isSelected);
 
+  drawPuniEars(ctx, radius, palette, p.wobble, press, popHop);
+
   ctx.fillStyle = bodyGradient;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, radius + wobbleX, radius + wobbleY, Math.sin(p.wobble) * 0.08, 0, Math.PI * 2);
+  drawPuniBodyPath(ctx, radius + wobbleX, radius * 0.94 + wobbleY, bodyRotation);
   ctx.fill();
 
-  ctx.globalAlpha = p.alpha * 0.38;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
+  ctx.lineWidth = Math.max(1.2, radius * 0.075);
+  ctx.stroke();
+
+  ctx.globalAlpha = p.alpha * 0.48;
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.ellipse(-radius * 0.32, -radius * 0.36, radius * 0.27, radius * 0.16, -0.6, 0, Math.PI * 2);
+  ctx.ellipse(-radius * 0.32, -radius * 0.38, radius * 0.25, radius * 0.14, -0.6, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.globalAlpha = p.alpha;
   ctx.fillStyle = palette.eye;
   ctx.beginPath();
-  ctx.arc(-radius * 0.26, -radius * 0.05, radius * 0.065, 0, Math.PI * 2);
-  ctx.arc(radius * 0.24, -radius * 0.05, radius * 0.065, 0, Math.PI * 2);
+  ctx.arc(-radius * 0.25, -radius * 0.04, radius * 0.068, 0, Math.PI * 2);
+  ctx.arc(radius * 0.25, -radius * 0.04, radius * 0.068, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = palette.eye;
-  ctx.lineWidth = Math.max(1.4, radius * 0.055);
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.arc(0, radius * 0.15, radius * 0.16, 0.15 * Math.PI, 0.85 * Math.PI);
-  ctx.stroke();
+  if (p.variant === "golden") {
+    drawGoldenPuniStar(ctx, radius);
+  }
 
   if (isSelected) {
     ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
@@ -2021,6 +2112,68 @@ function drawPuni(p, isSelected, isParent) {
   }
 
   ctx.restore();
+}
+
+function drawPuniEars(renderCtx, radius, palette, wobble, press = 0, popHop = 0) {
+  const earW = radius * 0.48;
+  const earH = radius * (0.68 + popHop * 0.12);
+  const baseY = -radius * 0.68;
+  const sway = Math.sin(wobble * 1.25) * radius * 0.018;
+  const spread = radius * (0.43 + press * 0.09 + popHop * 0.06);
+
+  renderCtx.save();
+  renderCtx.fillStyle = palette.fill;
+  renderCtx.strokeStyle = "rgba(255, 255, 255, 0.74)";
+  renderCtx.lineWidth = Math.max(1.1, radius * 0.065);
+  drawPuniEar(renderCtx, -spread, baseY + sway, earW, earH, -1, press);
+  drawPuniEar(renderCtx, spread, baseY - sway, earW, earH, 1, press);
+  renderCtx.restore();
+}
+
+function drawPuniEar(renderCtx, x, y, width, height, direction, press) {
+  const lean = direction * (width * (0.2 + press * 0.22));
+  renderCtx.beginPath();
+  renderCtx.moveTo(x - direction * width * 0.5, y + height * 0.5);
+  renderCtx.quadraticCurveTo(x - direction * width * 0.42, y - height * 0.26, x + lean, y - height * 0.62);
+  renderCtx.quadraticCurveTo(x + direction * width * 0.54, y - height * 0.18, x + direction * width * 0.48, y + height * 0.5);
+  renderCtx.closePath();
+  renderCtx.fill();
+  renderCtx.stroke();
+}
+
+function drawPuniBodyPath(renderCtx, radiusX, radiusY, rotation = 0) {
+  renderCtx.save();
+  renderCtx.rotate(rotation);
+  renderCtx.beginPath();
+  renderCtx.moveTo(0, -radiusY);
+  renderCtx.bezierCurveTo(radiusX * 0.72, -radiusY, radiusX * 1.08, -radiusY * 0.44, radiusX * 1.03, radiusY * 0.06);
+  renderCtx.bezierCurveTo(radiusX * 0.98, radiusY * 0.7, radiusX * 0.58, radiusY * 1.02, 0, radiusY);
+  renderCtx.bezierCurveTo(-radiusX * 0.58, radiusY * 1.02, -radiusX * 0.98, radiusY * 0.7, -radiusX * 1.03, radiusY * 0.06);
+  renderCtx.bezierCurveTo(-radiusX * 1.08, -radiusY * 0.44, -radiusX * 0.72, -radiusY, 0, -radiusY);
+  renderCtx.closePath();
+  renderCtx.restore();
+}
+
+function drawGoldenPuniStar(renderCtx, radius) {
+  const x = radius * 0.38;
+  const y = -radius * 0.28;
+  const outer = Math.max(3.2, radius * 0.17);
+  const inner = outer * 0.48;
+
+  renderCtx.save();
+  renderCtx.fillStyle = "rgba(255, 255, 245, 0.88)";
+  renderCtx.beginPath();
+  for (let i = 0; i < 10; i += 1) {
+    const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+    const r = i % 2 === 0 ? outer : inner;
+    const px = x + Math.cos(angle) * r;
+    const py = y + Math.sin(angle) * r;
+    if (i === 0) renderCtx.moveTo(px, py);
+    else renderCtx.lineTo(px, py);
+  }
+  renderCtx.closePath();
+  renderCtx.fill();
+  renderCtx.restore();
 }
 
 function drawSpike(spike) {
@@ -2103,11 +2256,11 @@ function drawSpike(spike) {
 
 function getPuniPalette(p) {
   if (p.variant === "golden") {
-    return { fill: "#ffd76a", shade: "#eba83b", eye: "#755d2c" };
+    return { fill: "#ffd45a", shade: "#f0aa32", eye: "#20243a" };
   }
 
   if (p.variant === "rainbow") {
-    return { fill: "#fdf8ff", shade: "#c8d8ff", eye: "#6a6684" };
+    return { fill: "#fdf8ff", shade: "#c8d8ff", eye: "#20243a" };
   }
 
   return COLORS[getEffectivePuniColor(p)];
@@ -2125,15 +2278,17 @@ function createPuniBodyGradient(p, palette, radius, isSelected) {
 
   if (p.variant === "rainbow") {
     bodyGradient.addColorStop(0, "#ffffff");
-    bodyGradient.addColorStop(0.28, isSelected ? "#ffffff" : "#ffe0ef");
-    bodyGradient.addColorStop(0.52, "#c8f4e8");
-    bodyGradient.addColorStop(0.76, "#cbd6ff");
-    bodyGradient.addColorStop(1, "#efd4ff");
+    bodyGradient.addColorStop(0.24, isSelected ? "#ffffff" : "#ffd7ec");
+    bodyGradient.addColorStop(0.46, "#bff4e4");
+    bodyGradient.addColorStop(0.66, "#ffe88d");
+    bodyGradient.addColorStop(0.84, "#9fcaff");
+    bodyGradient.addColorStop(1, "#dfa8ff");
     return bodyGradient;
   }
 
-  bodyGradient.addColorStop(0, isSelected ? "#ffffff" : palette.fill);
-  bodyGradient.addColorStop(0.42, palette.fill);
+  bodyGradient.addColorStop(0, isSelected ? "#ffffff" : "#fffefd");
+  bodyGradient.addColorStop(0.2, palette.fill);
+  bodyGradient.addColorStop(0.68, palette.fill);
   bodyGradient.addColorStop(1, palette.shade);
   return bodyGradient;
 }
@@ -2364,6 +2519,7 @@ function pointerDown(event) {
   pointer = pos;
   lastPointer = pos;
   selected = [hit];
+  hit.press = 1;
   selectedColor = isWildcardPuni(hit) ? null : getEffectivePuniColor(hit);
   audio.playChainStart();
   audio.playChainStep(1);
@@ -2473,6 +2629,7 @@ function pointerMove(event) {
 
   const hit = getSelectablePuni(pointer, previous);
   if (hit) {
+    hit.press = 1;
     selected.push(hit);
     updateSelectedColorFromPuni(hit);
     audio.playChainStep(selected.length);
@@ -2799,7 +2956,7 @@ function updateSkillUI() {
   skillNameText.textContent = skill ? skill.name : "NO SKILL";
   skillLevelText.textContent = `Lv${skillLevel}${skillLevel >= GAME_CONFIG.skill.maxLevel ? " MAX" : ""}`;
   skillFill.style.width = `${Math.min(100, skillGauge)}%`;
-  skillButton.disabled = !skill || skillLevel <= 0 || gameOver || skillSelecting || rewardChoosing || skillCastDelay > 0;
+  skillButton.disabled = !skill || skillLevel <= 0 || paused || gameOver || skillSelecting || rewardChoosing || skillCastDelay > 0;
   skillButton.textContent = skillLevel > 0 ? "SKILL!" : "SKILL";
 }
 
@@ -3063,6 +3220,9 @@ function updateStageTransition(dt) {
   stageTransitionTimer = Math.max(0, stageTransitionTimer - dt);
   if (stageTransitionTimer === 0) {
     stageBanner = null;
+    if (gameState === GAME_STATE.READY) {
+      setGameState(GAME_STATE.PLAYING);
+    }
   }
 }
 
@@ -3088,15 +3248,15 @@ function checkMissionReward() {
 function updateGameOverUI(title) {
   const recordState = updateHighScore();
 
+  setGameState(GAME_STATE.GAME_OVER);
   audio.stopFeverLayer();
   audio.stopBgm(1.2);
   if (recordState.isNewRecord) {
     audio.playJingle("newRecord");
   }
   rewardChoosing = false;
+  hideOverlayPanels();
   resultPanel.classList.remove("hidden");
-  rewardPanel.classList.add("hidden");
-  skillSelectPanel.classList.add("hidden");
   overlayTitle.textContent = title;
   finalStageText.textContent = currentStage.toString();
   bestScoreText.textContent = formatNumber(recordState.highScore);
@@ -3183,16 +3343,14 @@ function checkStageClear() {
 }
 
 function startStageTransition(nextStage) {
+  setGameState(GAME_STATE.READY);
   const extraSeconds = Math.min(5, playerUpgrades.nextStageExtraSeconds);
   currentStage = nextStage;
   timeLeft = GAME_CONFIG.baseSeconds + extraSeconds;
   lastCountdownSecond = null;
   playerUpgrades.nextStageExtraSeconds = 0;
   stageGimmickTime = 0;
-  selected = [];
-  selectedColor = null;
-  pointer = null;
-  lastPointer = null;
+  clearActiveInput();
   applyThemeToUI();
   stageTransitionTimer = 1.15;
   const theme = getCurrentTheme();
@@ -3214,24 +3372,20 @@ function startStageTransition(nextStage) {
 }
 
 function showRewardPresent(nextStage) {
-  rewardChoosing = true;
+  setGameState(GAME_STATE.REWARD);
   rewardNextStage = nextStage;
   const reward = getRandomReward();
   rewardChoices = [reward];
   resetStageRewards();
   applyReward(reward.id);
-  selected = [];
-  selectedColor = null;
-  pointer = null;
-  lastPointer = null;
+  clearActiveInput();
   rewardPresentTimer = 2.4;
   screenFlash = 1.3;
   audio.playJingle("stageClear");
   stageBanner = null;
   stageTransitionTimer = 0;
 
-  resultPanel.classList.add("hidden");
-  skillSelectPanel.classList.add("hidden");
+  hideOverlayPanels();
   rewardPanel.classList.remove("hidden");
   overlay.classList.remove("pause-overlay");
   overlay.classList.remove("hidden");
@@ -3269,9 +3423,8 @@ function resetStageRewards() {
 }
 
 function showSkillSelect() {
-  skillSelecting = true;
-  resultPanel.classList.add("hidden");
-  rewardPanel.classList.add("hidden");
+  setGameState(GAME_STATE.SKILL_SELECT);
+  hideOverlayPanels();
   skillSelectPanel.classList.remove("hidden");
   overlay.classList.remove("pause-overlay");
   overlay.classList.remove("hidden");
@@ -3290,7 +3443,7 @@ function showSkillSelect() {
 function selectSkill(skillId) {
   audio.unlock();
   selectedSkillId = skillId;
-  skillSelecting = false;
+  setGameState(GAME_STATE.READY);
   overlay.classList.add("hidden");
   skillSelectPanel.classList.add("hidden");
   resultPanel.classList.remove("hidden");
@@ -3359,11 +3512,8 @@ function burstPiecesOutward() {
 }
 
 function showAllClear() {
-  gameOver = true;
-  selected = [];
-  selectedColor = null;
-  pointer = null;
-  lastPointer = null;
+  setGameState(GAME_STATE.GAME_OVER);
+  clearActiveInput();
   screenFlash = 1.8;
   audio.playJingle("allClear");
   updateGameOverUI("ALL CLEAR!");
@@ -3567,24 +3717,71 @@ function getSelectedCenter() {
 }
 
 function togglePause() {
-  if (gameOver || rewardChoosing || skillSelecting || skillCastDelay > 0) return;
-  paused = !paused;
-  pauseButton.textContent = paused ? "▶" : "II";
-  resultPanel.classList.remove("hidden");
-  rewardPanel.classList.add("hidden");
-  skillSelectPanel.classList.add("hidden");
-  overlayTitle.textContent = "PAUSE";
-  finalScoreText.textContent = formatNumber(score);
-  overlay.classList.toggle("pause-overlay", paused);
-  overlay.classList.toggle("hidden", !paused);
+  if (gameState === GAME_STATE.PAUSED || gameState === GAME_STATE.EXIT_CONFIRM) {
+    resumeGame();
+    return;
+  }
+  if (!isPauseAllowed() || skillCastDelay > 0) return;
+  showPause();
+}
+
+function showPause() {
+  prePauseState = gameState === GAME_STATE.READY ? GAME_STATE.READY : GAME_STATE.PLAYING;
+  setGameState(GAME_STATE.PAUSED);
+  clearActiveInput();
+  audio.unlock();
+  audio.playSe("chainStart", { frequency: 330, volume: 0.16 });
+  audio.pauseGameAudio();
+  hideOverlayPanels();
+  pausePanel.classList.remove("hidden");
+  overlay.classList.add("pause-overlay");
+  overlay.classList.remove("hidden");
+}
+
+function resumeGame() {
+  if (gameState !== GAME_STATE.PAUSED && gameState !== GAME_STATE.EXIT_CONFIRM) return;
+  const nextState = prePauseState === GAME_STATE.READY ? GAME_STATE.READY : GAME_STATE.PLAYING;
+  setGameState(nextState);
+  audio.unlock();
+  audio.playSe("chainStep", { frequency: 440, volume: 0.16 });
+  audio.resumeGameAudio();
+  hideOverlayPanels();
+  overlay.classList.remove("pause-overlay");
+  overlay.classList.add("hidden");
+  lastTime = performance.now();
+}
+
+function showExitConfirm() {
+  if (gameState !== GAME_STATE.PAUSED) return;
+  setGameState(GAME_STATE.EXIT_CONFIRM);
+  audio.playSe("chainStart", { frequency: 260, volume: 0.14 });
+  hideOverlayPanels();
+  confirmExitPanel.classList.remove("hidden");
+  overlay.classList.add("pause-overlay");
+  overlay.classList.remove("hidden");
+}
+
+function cancelExitConfirm() {
+  if (gameState !== GAME_STATE.EXIT_CONFIRM) return;
+  setGameState(GAME_STATE.PAUSED);
+  audio.playSe("chainStep", { frequency: 360, volume: 0.14 });
+  hideOverlayPanels();
+  pausePanel.classList.remove("hidden");
+  overlay.classList.add("pause-overlay");
+  overlay.classList.remove("hidden");
+}
+
+function returnToTitle() {
+  if (gameState !== GAME_STATE.PAUSED && gameState !== GAME_STATE.EXIT_CONFIRM) return;
+  audio.unlock();
+  audio.playSe("chainStep", { frequency: 300, volume: 0.16 });
+  audio.returnToTitleAudio();
+  init(true);
 }
 
 function endGame() {
-  gameOver = true;
-  selected = [];
-  selectedColor = null;
-  pointer = null;
-  lastPointer = null;
+  setGameState(GAME_STATE.GAME_OVER);
+  clearActiveInput();
   audio.playJingle("gameOver");
   updateGameOverUI("GAME OVER");
 }
@@ -3642,6 +3839,10 @@ window.addEventListener("mouseup", pointerUp);
 pauseButton.addEventListener("click", togglePause);
 skillButton.addEventListener("click", castSkill);
 playButton.addEventListener("click", startGameFromTitle);
+resumeButton.addEventListener("click", resumeGame);
+titleExitButton.addEventListener("click", showExitConfirm);
+confirmExitYesButton.addEventListener("click", returnToTitle);
+confirmExitNoButton.addEventListener("click", cancelExitConfirm);
 settingsButton.addEventListener("click", () => openTitleModal("settings"));
 howToButton.addEventListener("click", () => openTitleModal("howto"));
 titleModalClose.addEventListener("click", closeTitleModal);
