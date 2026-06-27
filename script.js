@@ -65,18 +65,21 @@ const COLORS = [
 
 const AUDIO_ASSETS = {
   bgm: {
-    title: "assets/bgm/bgm_title.mp3",
-    stage01: "assets/bgm/bgm_stage01.mp3",
-    stage02: "assets/bgm/bgm_stage02.mp3",
-    stage03: "assets/bgm/bgm_stage03.mp3",
-    stage04: "assets/bgm/bgm_stage04.mp3",
-    stage05: "assets/bgm/bgm_stage05.mp3",
-    stage06: "assets/bgm/bgm_stage06.mp3",
-    stage07: "assets/bgm/bgm_stage07.mp3",
-    stage08: "assets/bgm/bgm_stage08.mp3",
-    stage09: "assets/bgm/bgm_stage09.mp3",
-    stage10: "assets/bgm/bgm_stage10.mp3",
-    feverLayer: "assets/bgm/bgm_fever_layer.mp3"
+    title: "assets/bgm/title.mp3",
+    stage01: "assets/bgm/stage01.mp3",
+    stage02: "assets/bgm/stage02.mp3",
+    stage03: "assets/bgm/stage03.mp3",
+    stage04: "assets/bgm/stage04.mp3",
+    stage05: "assets/bgm/stage05.mp3",
+    stage06: "assets/bgm/stage06.mp3",
+    stage07: "assets/bgm/stage07.mp3",
+    stage08: "assets/bgm/stage08.mp3",
+    stage09: "assets/bgm/stage09.mp3",
+    stage10: "assets/bgm/stage10.mp3",
+    fever: "assets/bgm/fever.mp3",
+    timeup: "assets/bgm/timeup.mp3",
+    stageclear: "assets/bgm/stageclear.mp3",
+    gameover: "assets/bgm/gameover.mp3"
   },
   se: {
     chainStart: "assets/se/chain_start.mp3",
@@ -114,11 +117,16 @@ class AudioManager {
     this.seGain = null;
     this.currentBgm = null;
     this.feverLayer = null;
+    this.bgmElements = new Map();
+    this.bgmFadeTimer = null;
     this.bgmVolume = 0.34;
+    this.bgmDuckVolume = 1;
     this.seVolume = 0.75;
     this.muted = false;
     this.silenceRestoreTimer = null;
     this.bgmDuckTimer = null;
+    this.bgmTransitionId = 0;
+    this.lastStage = 1;
     this.stageFrequencies = [130.81, 146.83, 164.81, 174.61, 196, 220, 246.94, 261.63, 293.66, 329.63];
     this.chainScale = [261.63, 293.66, 329.63, 349.23, 392, 440, 493.88, 523.25, 587.33, 659.25];
   }
@@ -152,6 +160,9 @@ class AudioManager {
   setBgmVolume(volume) {
     this.bgmVolume = Math.max(0, Math.min(1, volume));
     if (this.bgmGain) this.bgmGain.gain.setTargetAtTime(this.bgmVolume, this.context.currentTime, 0.05);
+    if (this.currentBgm) {
+      this.fadeBgmVolume(this.currentBgm.element, this.getBgmOutputVolume(this.currentBgm.volumeScale), 0.05);
+    }
   }
 
   setSeVolume(volume) {
@@ -164,257 +175,163 @@ class AudioManager {
     const context = this.ensure();
     if (!context) return;
     this.masterGain.gain.setTargetAtTime(muted ? 0 : 1, context.currentTime, 0.04);
+    if (this.currentBgm) {
+      this.fadeBgmVolume(this.currentBgm.element, this.getBgmOutputVolume(this.currentBgm.volumeScale), 0.04);
+    }
+  }
+
+  getBgmElement(key) {
+    const sourcePath = this.assets.bgm[key];
+    if (!sourcePath) return null;
+    if (!this.bgmElements.has(key)) {
+      const element = new Audio(sourcePath);
+      element.preload = "auto";
+      element.volume = 0;
+      this.bgmElements.set(key, element);
+    }
+    return this.bgmElements.get(key);
+  }
+
+  getBgmOutputVolume(scale = 1) {
+    return this.muted ? 0 : this.bgmVolume * this.bgmDuckVolume * scale;
+  }
+
+  setElementVolume(element, volume) {
+    if (!element) return;
+    element.volume = Math.max(0, Math.min(1, volume));
+  }
+
+  playBgm(key, { loop = true, fadeSeconds = 0.8, restart = false, volumeScale = 1, onEnded = null } = {}) {
+    const context = this.ensure();
+    if (!context) return;
+    const element = this.getBgmElement(key);
+    if (!element) return;
+
+    const current = this.currentBgm;
+    if (current && current.key === key && current.loop === loop && !restart) {
+      current.onEnded = onEnded;
+      current.volumeScale = volumeScale;
+      element.loop = loop;
+      this.fadeBgmVolume(element, this.getBgmOutputVolume(volumeScale), fadeSeconds);
+      if (element.paused) element.play().catch(() => {});
+      return;
+    }
+
+    this.fadeOutBgm(fadeSeconds * 0.55, false);
+    this.bgmTransitionId += 1;
+    const transitionId = this.bgmTransitionId;
+
+    element.loop = loop;
+    element.onended = null;
+    if (restart) {
+      try {
+        element.currentTime = 0;
+      } catch (error) {
+        // Some browsers can reject currentTime changes until metadata is ready.
+      }
+    }
+    this.setElementVolume(element, 0);
+    element.play().catch(() => {});
+    this.currentBgm = { key, element, loop, onEnded, volumeScale };
+    this.fadeBgmVolume(element, this.getBgmOutputVolume(volumeScale), fadeSeconds);
+
+    if (!loop && onEnded) {
+      element.onended = () => {
+        if (this.bgmTransitionId !== transitionId) return;
+        this.currentBgm = null;
+        onEnded();
+      };
+    }
+  }
+
+  fadeBgmVolume(element, targetVolume, fadeSeconds = 0.5) {
+    window.clearInterval(element?._bgmFadeTimer);
+    if (!element || fadeSeconds <= 0) {
+      this.setElementVolume(element, targetVolume);
+      return;
+    }
+
+    const startVolume = element.volume;
+    const startedAt = performance.now();
+    const durationMs = fadeSeconds * 1000;
+    element._bgmFadeTimer = window.setInterval(() => {
+      const progress = Math.min(1, (performance.now() - startedAt) / durationMs);
+      this.setElementVolume(element, startVolume + (targetVolume - startVolume) * progress);
+      if (progress >= 1) {
+        window.clearInterval(element._bgmFadeTimer);
+        element._bgmFadeTimer = null;
+      }
+    }, 30);
   }
 
   playStageBgm(stage, fadeSeconds = 0.8) {
-    const context = this.ensure();
-    if (!context) return;
-
-    const key = `stage${String(stage).padStart(2, "0")}`;
-    const sourcePath = this.assets.bgm[key];
-    this.stopBgm(0.35);
-
-    const baseFrequency = this.stageFrequencies[(stage - 1) % this.stageFrequencies.length];
-    const output = context.createGain();
-    output.gain.value = 0;
-    output.connect(this.bgmGain);
-
-    const now = context.currentTime;
-    output.gain.cancelScheduledValues(now);
-    output.gain.setValueAtTime(0, now);
-    output.gain.linearRampToValueAtTime(1, now + fadeSeconds);
-
-    const scale = [0, 2, 3, 7, 8, 10, 12];
-    const getNote = (step, octave = 1) => baseFrequency * Math.pow(2, (scale[Math.abs(step) % scale.length] + octave * 12) / 12);
-    const beatSeconds = Math.max(0.18, 0.24 - stage * 0.004);
-    const barSeconds = beatSeconds * 8;
-    const timers = [];
-    let bar = 0;
-
-    const playBar = () => {
-      const motif = stage % 2 === 0 ? [0, 2, 3, 5, 3, 2, 6, 5] : [0, 3, 5, 3, 6, 5, 3, 2];
-      const bass = bar % 2 === 0 ? 0 : 3;
-      this.playTone({
-        frequency: getNote(bass, 0),
-        duration: 0.16,
-        type: "triangle",
-        volume: 0.08,
-        attack: 0.006,
-        decay: 0.12,
-        destination: output
-      });
-      this.playTone({
-        frequency: getNote(bass, 0) * 1.5,
-        duration: 0.08,
-        type: "square",
-        volume: 0.022,
-        attack: 0.003,
-        decay: 0.06,
-        delay: beatSeconds * 2,
-        destination: output
-      });
-      this.playTone({
-        frequency: getNote(bass, 0),
-        duration: 0.11,
-        type: "triangle",
-        volume: 0.06,
-        attack: 0.004,
-        decay: 0.08,
-        delay: beatSeconds * 4,
-        destination: output
-      });
-      this.playTone({
-        frequency: getNote(bass + 2, 0),
-        duration: 0.08,
-        type: "square",
-        volume: 0.024,
-        attack: 0.003,
-        decay: 0.06,
-        delay: beatSeconds * 6,
-        destination: output
-      });
-      motif.forEach((step, index) => {
-        this.playTone({
-          frequency: getNote(step + bar, 1),
-          duration: 0.085,
-          type: index % 2 === 0 ? "triangle" : "sine",
-          volume: index % 2 === 0 ? 0.062 : 0.046,
-          attack: 0.004,
-          decay: 0.075,
-          delay: index * beatSeconds,
-          destination: output
-        });
-      });
-      if (bar % 2 === 1 || stage >= 5) {
-        this.playTone({
-          frequency: getNote(6 + bar, 2),
-          duration: 0.07,
-          type: "sine",
-          volume: 0.036,
-          attack: 0.004,
-          decay: 0.08,
-          delay: beatSeconds * 7.5,
-          destination: output
-        });
-      }
-      bar = (bar + 1) % scale.length;
-    };
-
-    playBar();
-    timers.push(window.setInterval(playBar, barSeconds * 1000));
-
-    this.currentBgm = {
-      key,
-      sourcePath,
-      nodes: [],
-      timers,
-      gain: output
-    };
+    this.lastStage = Math.max(1, stage);
+    const stageNumber = Math.min(10, Math.max(1, Math.floor(stage)));
+    const key = `stage${String(stageNumber).padStart(2, "0")}`;
+    this.playBgm(key, { loop: true, fadeSeconds });
   }
 
   playTitleBgm(fadeSeconds = 0.8) {
-    const context = this.ensure();
-    if (!context) return;
+    this.playBgm("title", { loop: true, fadeSeconds, volumeScale: 0.86 });
+  }
 
-    this.stopBgm(0.35);
-    const output = context.createGain();
-    output.gain.value = 0;
-    output.connect(this.bgmGain);
+  playFeverBgm(fadeSeconds = 0.45) {
+    this.playBgm("fever", { loop: true, fadeSeconds });
+  }
 
-    const now = context.currentTime;
-    output.gain.cancelScheduledValues(now);
-    output.gain.setValueAtTime(0, now);
-    output.gain.linearRampToValueAtTime(0.86, now + fadeSeconds);
+  playTimeupBgm(fadeSeconds = 0.35) {
+    this.playBgm("timeup", { loop: true, fadeSeconds });
+  }
 
-    const motif = [0, 4, 7, 9, 7, 4, 2, 7];
-    const timers = [];
-    let bar = 0;
-    const beatSeconds = 0.28;
-    const base = 261.63;
-    const note = (semi) => base * Math.pow(2, semi / 12);
+  resumeStageBgm(fadeSeconds = 0.6) {
+    this.playStageBgm(this.lastStage, fadeSeconds);
+  }
 
-    const playBar = () => {
-      this.playTone({
-        frequency: note(bar % 2 === 0 ? 0 : 5),
-        duration: 0.16,
-        type: "triangle",
-        volume: 0.055,
-        attack: 0.008,
-        decay: 0.12,
-        destination: output
-      });
-      motif.forEach((step, index) => {
-        this.playTone({
-          frequency: note(step + (bar % 3 === 2 ? 2 : 0) + 12),
-          duration: 0.09,
-          type: "sine",
-          volume: 0.042,
-          attack: 0.006,
-          decay: 0.08,
-          delay: index * beatSeconds,
-          destination: output
-        });
-      });
-      bar += 1;
-    };
+  playStageClear(fadeSeconds = 0.35) {
+    this.playBgm("stageclear", {
+      loop: false,
+      fadeSeconds,
+      restart: true,
+      onEnded: () => this.playTitleBgm(0.7)
+    });
+  }
 
-    playBar();
-    timers.push(window.setInterval(playBar, beatSeconds * motif.length * 1000));
-
-    this.currentBgm = {
-      key: "title",
-      sourcePath: this.assets.bgm.title,
-      nodes: [],
-      timers,
-      gain: output
-    };
+  playGameOver(fadeSeconds = 0.35) {
+    this.playBgm("gameover", {
+      loop: false,
+      fadeSeconds,
+      restart: true,
+      onEnded: () => this.playTitleBgm(0.7)
+    });
   }
 
   stopBgm(fadeSeconds = 0.5) {
-    if (!this.context || !this.currentBgm) return;
-    for (const timer of this.currentBgm.timers || []) {
-      window.clearInterval(timer);
-      window.clearTimeout(timer);
-    }
-    this.fadeAndStop(this.currentBgm.nodes, this.currentBgm.gain, fadeSeconds);
-    this.currentBgm = null;
+    this.fadeOutBgm(fadeSeconds, true);
+  }
+
+  fadeOutBgm(fadeSeconds = 0.5, clearCurrent = true) {
+    if (!this.currentBgm) return;
+    this.bgmTransitionId += 1;
+    const record = this.currentBgm;
+    record.element.onended = null;
+    this.fadeBgmVolume(record.element, 0, fadeSeconds);
+    window.setTimeout(() => {
+      record.element.pause();
+      try {
+        record.element.currentTime = 0;
+      } catch (error) {
+        // Resetting is best-effort; playback can still continue from the start next time.
+      }
+    }, fadeSeconds * 1000 + 60);
+    if (clearCurrent) this.currentBgm = null;
   }
 
   startFeverLayer() {
-    const context = this.ensure();
-    if (!context || this.feverLayer) return;
-
-    const gain = context.createGain();
-    gain.gain.value = 0;
-    gain.connect(this.bgmGain);
-
-    const now = context.currentTime;
-    gain.gain.linearRampToValueAtTime(1, now + 0.35);
-
-    const timers = [];
-    let tick = 0;
-    const playPulse = () => {
-      const root = 440 * Math.pow(2, (tick % 6) / 12);
-      this.playTone({
-        frequency: tick % 2 === 0 ? 110 : 146.83,
-        duration: 0.05,
-        type: "triangle",
-        volume: 0.18,
-        attack: 0.003,
-        decay: 0.065,
-        destination: gain
-      });
-      this.playTone({
-        frequency: root,
-        duration: 0.075,
-        type: "sawtooth",
-        volume: 0.088,
-        attack: 0.004,
-        decay: 0.065,
-        delay: 0.075,
-        destination: gain
-      });
-      this.playTone({
-        frequency: root * 2,
-        duration: 0.065,
-        type: "sine",
-        volume: 0.065,
-        attack: 0.004,
-        decay: 0.06,
-        delay: 0.15,
-        destination: gain
-      });
-      this.playTone({
-        frequency: root * 1.5,
-        duration: 0.045,
-        type: "square",
-        volume: 0.038,
-        attack: 0.002,
-        decay: 0.045,
-        delay: 0.225,
-        destination: gain
-      });
-      tick += 1;
-    };
-
-    playPulse();
-    timers.push(window.setInterval(playPulse, 270));
-    this.feverLayer = {
-      sourcePath: this.assets.bgm.feverLayer,
-      nodes: [],
-      timers,
-      gain
-    };
+    this.playFeverBgm();
   }
 
-  stopFeverLayer(fadeSeconds = 0.7) {
-    if (!this.context || !this.feverLayer) return;
-    for (const timer of this.feverLayer.timers || []) {
-      window.clearInterval(timer);
-      window.clearTimeout(timer);
-    }
-    this.fadeAndStop(this.feverLayer.nodes, this.feverLayer.gain, fadeSeconds);
-    this.feverLayer = null;
+  stopFeverLayer(fadeSeconds = 0.6) {
+    this.resumeStageBgm(fadeSeconds);
   }
 
   fadeAndStop(nodes, gain, fadeSeconds) {
@@ -433,37 +350,47 @@ class AudioManager {
 
   duckBgm(duration = 1.1) {
     const context = this.ensure();
-    if (!context || !this.bgmGain) return;
+    if (!context) return;
     window.clearTimeout(this.bgmDuckTimer);
-    const now = context.currentTime;
-    this.bgmGain.gain.cancelScheduledValues(now);
-    this.bgmGain.gain.setTargetAtTime(this.bgmVolume * 0.48, now, 0.035);
+    this.bgmDuckVolume = 0.48;
+    if (this.bgmGain) {
+      const now = context.currentTime;
+      this.bgmGain.gain.cancelScheduledValues(now);
+      this.bgmGain.gain.setTargetAtTime(this.bgmVolume * this.bgmDuckVolume, now, 0.035);
+    }
+    if (this.currentBgm) {
+      this.fadeBgmVolume(this.currentBgm.element, this.getBgmOutputVolume(this.currentBgm.volumeScale), 0.08);
+    }
     this.bgmDuckTimer = window.setTimeout(() => {
-      if (!this.context || !this.bgmGain) return;
-      this.bgmGain.gain.setTargetAtTime(this.bgmVolume, this.context.currentTime, 0.12);
+      this.bgmDuckVolume = 1;
+      if (this.context && this.bgmGain) {
+        this.bgmGain.gain.setTargetAtTime(this.bgmVolume, this.context.currentTime, 0.12);
+      }
+      if (this.currentBgm) {
+        this.fadeBgmVolume(this.currentBgm.element, this.getBgmOutputVolume(this.currentBgm.volumeScale), 0.12);
+      }
     }, duration * 1000);
   }
 
   pauseGameAudio() {
     const context = this.ensure();
-    if (!context || !this.bgmGain) return;
+    if (!context) return;
     window.clearTimeout(this.bgmDuckTimer);
-    this.bgmGain.gain.cancelScheduledValues(context.currentTime);
-    this.bgmGain.gain.setTargetAtTime(this.bgmVolume * 0.42, context.currentTime, 0.08);
+    this.bgmDuckVolume = 1;
+    this.playTitleBgm(0.45);
   }
 
   resumeGameAudio() {
     const context = this.ensure();
-    if (!context || !this.bgmGain) return;
+    if (!context) return;
     window.clearTimeout(this.bgmDuckTimer);
-    this.bgmGain.gain.cancelScheduledValues(context.currentTime);
-    this.bgmGain.gain.setTargetAtTime(this.bgmVolume, context.currentTime, 0.08);
+    this.bgmDuckVolume = 1;
+    this.resumeStageBgm(0.45);
   }
 
   returnToTitleAudio() {
-    this.resumeGameAudio();
-    this.stopFeverLayer(0.25);
-    this.stopBgm(0.55);
+    this.bgmDuckVolume = 1;
+    this.playTitleBgm(0.55);
   }
 
   silenceBriefly(duration = 0.2) {
@@ -963,6 +890,7 @@ let stageTransitionTimer = 0;
 let stageBanner = null;
 let stageGimmickTime = 0;
 let lastCountdownSecond = null;
+let timeupBgmActive = false;
 let feverGauge = 0;
 let feverActive = false;
 let feverTimer = 0;
@@ -1024,6 +952,7 @@ function init(showTitle = true) {
   stageBanner = null;
   stageGimmickTime = 0;
   lastCountdownSecond = null;
+  timeupBgmActive = false;
   feverGauge = 0;
   feverActive = false;
   feverTimer = 0;
@@ -1067,7 +996,6 @@ function init(showTitle = true) {
   scorePopups = [];
   chainNotices = [];
   screenFlash = 0;
-  audio.stopFeverLayer(0.2);
   audio.stopBgm(0.2);
   gameCard.classList.remove("fever-active");
   overlay.classList.add("hidden");
@@ -1540,7 +1468,20 @@ function updateCountdownAudio() {
   const remaining = Math.ceil(timeLeft);
   if (remaining > 5) {
     lastCountdownSecond = null;
+    if (timeupBgmActive) {
+      timeupBgmActive = false;
+      if (feverActive) {
+        audio.playFeverBgm();
+      } else {
+        audio.resumeStageBgm();
+      }
+    }
     return;
+  }
+
+  if (!timeupBgmActive && remaining > 0) {
+    timeupBgmActive = true;
+    audio.playTimeupBgm();
   }
 
   if (remaining > 0 && remaining !== lastCountdownSecond) {
@@ -2847,7 +2788,7 @@ function startFever() {
   feverNoticeTimer = 1.4;
   screenFlash = Math.max(screenFlash, 1.2);
   audio.playFeverStartSequence();
-  audio.startFeverLayer();
+  audio.playFeverBgm();
   chainNotices.push({
     x: playWidth * 0.5,
     y: 112,
@@ -2882,7 +2823,12 @@ function endFever() {
   feverGauge = 0;
   feverNoticeTimer = 0;
   audio.playFeverEndSequence();
-  audio.stopFeverLayer();
+  if (timeupBgmActive || timeLeft <= 5) {
+    timeupBgmActive = timeLeft > 0;
+    if (timeupBgmActive) audio.playTimeupBgm();
+  } else {
+    audio.resumeStageBgm();
+  }
   updateFeverUI();
 }
 
@@ -3249,8 +3195,12 @@ function updateGameOverUI(title) {
   const recordState = updateHighScore();
 
   setGameState(GAME_STATE.GAME_OVER);
-  audio.stopFeverLayer();
-  audio.stopBgm(1.2);
+  timeupBgmActive = false;
+  if (title === "GAME OVER") {
+    audio.playGameOver();
+  } else {
+    audio.playStageClear();
+  }
   if (recordState.isNewRecord) {
     audio.playJingle("newRecord");
   }
@@ -3348,6 +3298,7 @@ function startStageTransition(nextStage) {
   currentStage = nextStage;
   timeLeft = GAME_CONFIG.baseSeconds + extraSeconds;
   lastCountdownSecond = null;
+  timeupBgmActive = false;
   playerUpgrades.nextStageExtraSeconds = 0;
   stageGimmickTime = 0;
   clearActiveInput();
@@ -3381,6 +3332,8 @@ function showRewardPresent(nextStage) {
   clearActiveInput();
   rewardPresentTimer = 2.4;
   screenFlash = 1.3;
+  timeupBgmActive = false;
+  audio.playStageClear();
   audio.playJingle("stageClear");
   stageBanner = null;
   stageTransitionTimer = 0;
@@ -3424,6 +3377,9 @@ function resetStageRewards() {
 
 function showSkillSelect() {
   setGameState(GAME_STATE.SKILL_SELECT);
+  if (audio.context) {
+    audio.playTitleBgm();
+  }
   hideOverlayPanels();
   skillSelectPanel.classList.remove("hidden");
   overlay.classList.remove("pause-overlay");
@@ -3449,6 +3405,7 @@ function selectSkill(skillId) {
   resultPanel.classList.remove("hidden");
   skillOptions.innerHTML = "";
   lastTime = performance.now();
+  timeupBgmActive = false;
   audio.playStageBgm(currentStage);
   audio.playJingle("stageStart");
   stageTransitionTimer = 0.8;
@@ -3731,7 +3688,7 @@ function showPause() {
   clearActiveInput();
   audio.unlock();
   audio.playSe("chainStart", { frequency: 330, volume: 0.16 });
-  audio.pauseGameAudio();
+  audio.playTitleBgm(0.45);
   hideOverlayPanels();
   pausePanel.classList.remove("hidden");
   overlay.classList.add("pause-overlay");
@@ -3744,7 +3701,14 @@ function resumeGame() {
   setGameState(nextState);
   audio.unlock();
   audio.playSe("chainStep", { frequency: 440, volume: 0.16 });
-  audio.resumeGameAudio();
+  if (timeupBgmActive || timeLeft <= 5) {
+    timeupBgmActive = timeLeft > 0;
+    if (timeupBgmActive) audio.playTimeupBgm(0.45);
+  } else if (feverActive) {
+    audio.playFeverBgm(0.45);
+  } else {
+    audio.resumeStageBgm(0.45);
+  }
   hideOverlayPanels();
   overlay.classList.remove("pause-overlay");
   overlay.classList.add("hidden");
