@@ -119,6 +119,7 @@ class AudioManager {
     this.seGain = null;
     this.currentBgm = null;
     this.feverLayer = null;
+    this.bgmElement = null;
     this.bgmElements = new Map();
     this.bgmFadeTimer = null;
     this.bgmVolume = 0.34;
@@ -185,13 +186,21 @@ class AudioManager {
   getBgmElement(key) {
     const sourcePath = this.assets.bgm[key];
     if (!sourcePath) return null;
-    if (!this.bgmElements.has(key)) {
-      const element = new Audio(sourcePath);
+    if (!this.bgmElement) {
+      const element = new Audio();
       element.preload = "auto";
+      element.playsInline = true;
+      element.setAttribute("playsinline", "");
       element.volume = 0;
-      this.bgmElements.set(key, element);
+      this.bgmElement = element;
     }
-    return this.bgmElements.get(key);
+
+    if (this.bgmElement.dataset.key !== key) {
+      this.bgmElement.dataset.key = key;
+      this.bgmElement.src = sourcePath;
+      this.bgmElement.load();
+    }
+    return this.bgmElement;
   }
 
   getBgmOutputVolume(scale = 1) {
@@ -203,39 +212,50 @@ class AudioManager {
     element.volume = Math.max(0, Math.min(1, volume));
   }
 
-  playBgm(key, { loop = true, fadeSeconds = 0.8, restart = false, volumeScale = 1, onEnded = null } = {}) {
+  stopAllBgm() {
+    this.bgmTransitionId += 1;
+    window.clearTimeout(this.bgmDuckTimer);
+    this.bgmDuckVolume = 1;
+
+    const elements = new Set(this.bgmElements.values());
+    if (this.bgmElement) elements.add(this.bgmElement);
+
+    for (const element of elements) {
+      window.clearInterval(element._bgmFadeTimer);
+      element._bgmFadeTimer = null;
+      element.onended = null;
+      element.loop = false;
+      this.setElementVolume(element, 0);
+      element.pause();
+      try {
+        element.currentTime = 0;
+      } catch (error) {
+        // Resetting is best-effort; some mobile browsers delay seeking until metadata is ready.
+      }
+    }
+
+    this.currentBgm = null;
+  }
+
+  playBgm(key, { loop = true, fadeSeconds = 0.8, volumeScale = 1, onEnded = null } = {}) {
     const context = this.ensure();
     if (!context) return;
     const element = this.getBgmElement(key);
     if (!element) return;
 
-    const current = this.currentBgm;
-    if (current && current.key === key && current.loop === loop && !restart) {
-      current.onEnded = onEnded;
-      current.volumeScale = volumeScale;
-      element.loop = loop;
-      this.fadeBgmVolume(element, this.getBgmOutputVolume(volumeScale), fadeSeconds);
-      if (element.paused) element.play().catch(() => {});
-      return;
-    }
-
-    this.fadeOutBgm(fadeSeconds * 0.55, false);
-    this.bgmTransitionId += 1;
+    this.stopAllBgm();
     const transitionId = this.bgmTransitionId;
+    const safeFadeSeconds = Math.min(Math.max(0, fadeSeconds), 0.28);
 
     element.loop = loop;
     element.onended = null;
-    if (restart) {
-      try {
-        element.currentTime = 0;
-      } catch (error) {
-        // Some browsers can reject currentTime changes until metadata is ready.
-      }
+    try {
+      element.currentTime = 0;
+    } catch (error) {
+      // Some browsers can reject currentTime changes until metadata is ready.
     }
     this.setElementVolume(element, 0);
-    element.play().catch(() => {});
     this.currentBgm = { key, element, loop, onEnded, volumeScale };
-    this.fadeBgmVolume(element, this.getBgmOutputVolume(volumeScale), fadeSeconds);
 
     if (!loop && onEnded) {
       element.onended = () => {
@@ -244,6 +264,13 @@ class AudioManager {
         onEnded();
       };
     }
+
+    element.play().catch(() => {
+      if (this.bgmTransitionId === transitionId && this.currentBgm?.element === element) {
+        this.currentBgm = null;
+      }
+    });
+    this.fadeBgmVolume(element, this.getBgmOutputVolume(volumeScale), safeFadeSeconds);
   }
 
   fadeBgmVolume(element, targetVolume, fadeSeconds = 0.5) {
@@ -293,7 +320,6 @@ class AudioManager {
     this.playBgm("stageclear", {
       loop: false,
       fadeSeconds,
-      restart: true,
       onEnded: () => this.playTitleBgm(0.7)
     });
   }
@@ -302,30 +328,16 @@ class AudioManager {
     this.playBgm("gameover", {
       loop: false,
       fadeSeconds,
-      restart: true,
       onEnded: () => this.playTitleBgm(0.7)
     });
   }
 
   stopBgm(fadeSeconds = 0.5) {
-    this.fadeOutBgm(fadeSeconds, true);
+    this.stopAllBgm();
   }
 
   fadeOutBgm(fadeSeconds = 0.5, clearCurrent = true) {
-    if (!this.currentBgm) return;
-    this.bgmTransitionId += 1;
-    const record = this.currentBgm;
-    record.element.onended = null;
-    this.fadeBgmVolume(record.element, 0, fadeSeconds);
-    window.setTimeout(() => {
-      record.element.pause();
-      try {
-        record.element.currentTime = 0;
-      } catch (error) {
-        // Resetting is best-effort; playback can still continue from the start next time.
-      }
-    }, fadeSeconds * 1000 + 60);
-    if (clearCurrent) this.currentBgm = null;
+    this.stopAllBgm();
   }
 
   startFeverLayer() {
@@ -424,7 +436,25 @@ class AudioManager {
     gain.gain.linearRampToValueAtTime(volume, now + attack);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(attack + 0.02, duration + decay));
     oscillator.start(now);
-    oscillator.stop(now + duration + decay + 0.04);
+    const stopAt = now + duration + decay + 0.04;
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      try {
+        oscillator.disconnect();
+      } catch (error) {
+        // The node may already be disconnected by the browser.
+      }
+      try {
+        gain.disconnect();
+      } catch (error) {
+        // The node may already be disconnected by the browser.
+      }
+    };
+    oscillator.onended = cleanup;
+    window.setTimeout(cleanup, Math.max(0, (stopAt - context.currentTime) * 1000) + 120);
+    oscillator.stop(stopAt);
   }
 
   playSe(name, options = {}) {
@@ -1090,7 +1120,10 @@ function resizeTitleCanvas() {
 }
 
 function ensureGameOverTitleButton() {
-  if (gameOverTitleButton) return;
+  if (gameOverTitleButton) {
+    gameOverTitleButton.onclick = returnGameOverToTitle;
+    return;
+  }
 
   gameOverTitleButton = document.createElement("button");
   gameOverTitleButton.id = "gameOverTitleButton";
@@ -1098,7 +1131,7 @@ function ensureGameOverTitleButton() {
   gameOverTitleButton.type = "button";
   gameOverTitleButton.textContent = "TITLE";
   gameOverTitleButton.setAttribute("aria-label", "タイトルへ戻る");
-  gameOverTitleButton.addEventListener("click", returnGameOverToTitle);
+  gameOverTitleButton.onclick = returnGameOverToTitle;
 
   if (resultActions) {
     resultActions.appendChild(gameOverTitleButton);
@@ -1303,6 +1336,7 @@ function hideTitleScreen() {
 
 function unlockTitleBgm(fadeSeconds = 0.8) {
   audio.unlock();
+  if (audio.currentBgm?.key === "title" && !audio.currentBgm.element.paused) return;
   audio.playTitleBgm(fadeSeconds);
 }
 
@@ -2809,8 +2843,8 @@ function startFever() {
   feverGauge = 100;
   feverNoticeTimer = 1.4;
   screenFlash = Math.max(screenFlash, 1.2);
-  audio.playFeverStartSequence();
   audio.playFeverBgm();
+  audio.playFeverStartSequence();
   chainNotices.push({
     x: playWidth * 0.5,
     y: 112,
@@ -2844,13 +2878,21 @@ function endFever() {
   feverTimer = 0;
   feverGauge = 0;
   feverNoticeTimer = 0;
-  audio.playFeverEndSequence();
   if (timeupBgmActive || timeLeft <= 5) {
     timeupBgmActive = timeLeft > 0;
     if (timeupBgmActive) audio.playTimeupBgm();
   } else {
     audio.resumeStageBgm();
   }
+  audio.playFeverEndSequence();
+  updateFeverUI();
+}
+
+function resetFeverState() {
+  feverActive = false;
+  feverTimer = 0;
+  feverGauge = 0;
+  feverNoticeTimer = 0;
   updateFeverUI();
 }
 
@@ -3323,6 +3365,7 @@ function startStageTransition(nextStage) {
   timeLeft = GAME_CONFIG.baseSeconds + extraSeconds;
   lastCountdownSecond = null;
   timeupBgmActive = false;
+  resetFeverState();
   playerUpgrades.nextStageExtraSeconds = 0;
   stageGimmickTime = 0;
   clearActiveInput();
@@ -3335,8 +3378,8 @@ function startStageTransition(nextStage) {
     duration: stageTransitionTimer
   };
   screenFlash = 1.6;
-  audio.playJingle("stageUp");
   audio.playStageBgm(currentStage);
+  audio.playJingle("stageUp");
   audio.playJingle("stageStart");
 
   refreshBoardForStage();
@@ -3353,6 +3396,7 @@ function showRewardPresent(nextStage) {
   rewardChoices = [reward];
   resetStageRewards();
   applyReward(reward.id);
+  resetFeverState();
   clearActiveInput();
   rewardPresentTimer = 2.4;
   screenFlash = 1.3;
@@ -3430,6 +3474,7 @@ function selectSkill(skillId) {
   skillOptions.innerHTML = "";
   lastTime = performance.now();
   timeupBgmActive = false;
+  resetFeverState();
   audio.playStageBgm(currentStage);
   audio.playJingle("stageStart");
   stageTransitionTimer = 0.8;
@@ -3841,6 +3886,6 @@ settingsButton.addEventListener("click", () => openTitleModal("settings"));
 howToButton.addEventListener("click", () => openTitleModal("howto"));
 titleModalClose.addEventListener("click", closeTitleModal);
 retryButton.addEventListener("click", () => init(false));
-gameOverTitleButton?.addEventListener("click", returnGameOverToTitle);
+ensureGameOverTitleButton();
 
 init();
