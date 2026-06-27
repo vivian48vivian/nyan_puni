@@ -135,8 +135,8 @@ button {
 
 .title-logo-wrap {
   position: relative;
-  width: 74%;
-  max-width: 286px;
+  width: 90%;
+  max-width: 340px;
   margin-top: 2px;
   overflow: hidden;
   border-radius: 24px;
@@ -862,6 +862,17 @@ button {
   color: #657284;
 }
 
+.result-actions {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+}
+
+.result-actions.hidden {
+  display: none;
+}
+
 .retry-button {
   width: 148px;
   height: 48px;
@@ -870,6 +881,14 @@ button {
   font-weight: 900;
   background: linear-gradient(120deg, var(--theme-accent-soft), var(--theme-accent));
   box-shadow: 0 8px 20px rgba(130, 164, 174, 0.24);
+}
+
+.retry-button.secondary {
+  color: #6c7d8d;
+  background: rgba(238, 247, 250, 0.9);
+  box-shadow:
+    0 8px 18px rgba(112, 151, 170, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72);
 }
 
 .pause-menu-button {
@@ -920,6 +939,16 @@ button {
 @media (max-height: 680px) {
   .phone-shell {
     padding: 8px;
+  }
+
+  .title-content {
+    gap: 18px;
+    padding-top: 42px;
+  }
+
+  .title-logo-wrap {
+    width: 88%;
+    max-width: 318px;
   }
 
   .top-bar {

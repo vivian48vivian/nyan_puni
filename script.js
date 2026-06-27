@@ -39,7 +39,9 @@ const finalStageText = document.getElementById("finalStageText");
 const finalScoreText = document.getElementById("finalScoreText");
 const bestScoreText = document.getElementById("bestScoreText");
 const bestStageText = document.getElementById("bestStageText");
+const resultActions = document.getElementById("resultActions");
 const retryButton = document.getElementById("retryButton");
+let gameOverTitleButton = document.getElementById("gameOverTitleButton");
 const resumeButton = document.getElementById("resumeButton");
 const titleExitButton = document.getElementById("titleExitButton");
 const confirmExitYesButton = document.getElementById("confirmExitYesButton");
@@ -582,8 +584,8 @@ const GAME_CONFIG = {
   spikeCount: 3,
   missionTarget: 30,
   missionRewardSeconds: 5,
-  stageScoreBase: 10000,
-  stageTargetExponent: 1.7,
+  stageScoreBase: 9000,
+  stageTargetExponent: 1.55,
   maxStage: 10,
   fever: {
     duration: 10,
@@ -1001,6 +1003,7 @@ function init(showTitle = true) {
   overlay.classList.add("hidden");
   overlay.classList.remove("pause-overlay");
   resultPanel.classList.add("hidden");
+  resultActions?.classList.add("hidden");
   rewardPanel.classList.add("hidden");
   skillSelectPanel.classList.toggle("hidden", showTitle);
   pausePanel.classList.add("hidden");
@@ -1052,6 +1055,7 @@ function hideOverlayPanels() {
   skillSelectPanel.classList.add("hidden");
   pausePanel.classList.add("hidden");
   confirmExitPanel.classList.add("hidden");
+  resultActions?.classList.add("hidden");
 }
 
 function clearActiveInput() {
@@ -1083,6 +1087,24 @@ function resizeTitleCanvas() {
   titleCanvas.width = Math.floor(titleWidth * dpr);
   titleCanvas.height = Math.floor(titleHeight * dpr);
   titleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function ensureGameOverTitleButton() {
+  if (gameOverTitleButton) return;
+
+  gameOverTitleButton = document.createElement("button");
+  gameOverTitleButton.id = "gameOverTitleButton";
+  gameOverTitleButton.className = "retry-button secondary";
+  gameOverTitleButton.type = "button";
+  gameOverTitleButton.textContent = "TITLE";
+  gameOverTitleButton.setAttribute("aria-label", "タイトルへ戻る");
+  gameOverTitleButton.addEventListener("click", returnGameOverToTitle);
+
+  if (resultActions) {
+    resultActions.appendChild(gameOverTitleButton);
+  } else {
+    retryButton.insertAdjacentElement("afterend", gameOverTitleButton);
+  }
 }
 
 function createPuni() {
@@ -1277,6 +1299,11 @@ function hideTitleScreen() {
   titleScreen.classList.add("hidden");
   titleScreen.classList.remove("starting");
   titleModal.classList.add("hidden");
+}
+
+function unlockTitleBgm(fadeSeconds = 0.8) {
+  audio.unlock();
+  audio.playTitleBgm(fadeSeconds);
 }
 
 function updateTitleBestUI() {
@@ -2468,10 +2495,7 @@ function pointerDown(event) {
 
 function handleTitlePointerDown(event) {
   if (!titleActive || titleStarting) return;
-  audio.unlock();
-  if (!audio.currentBgm || audio.currentBgm.key !== "title") {
-    audio.playTitleBgm();
-  }
+  unlockTitleBgm();
 
   const rect = titleCanvas.getBoundingClientRect();
   const point = event.touches ? event.touches[0] : event;
@@ -2513,7 +2537,7 @@ function createTitleTapParticles(p) {
 
 function startGameFromTitle() {
   if (!titleActive || titleStarting) return;
-  audio.unlock();
+  unlockTitleBgm(0.2);
   audio.playJingle("gameStart");
   audio.stopBgm(0.55);
   titleStarting = true;
@@ -2526,10 +2550,7 @@ function startGameFromTitle() {
 }
 
 function openTitleModal(kind) {
-  audio.unlock();
-  if (!audio.currentBgm || audio.currentBgm.key !== "title") {
-    audio.playTitleBgm();
-  }
+  unlockTitleBgm();
   titleModal.classList.remove("hidden");
 
   if (kind === "settings") {
@@ -2552,6 +2573,7 @@ function openTitleModal(kind) {
 }
 
 function closeTitleModal() {
+  unlockTitleBgm();
   titleModal.classList.add("hidden");
 }
 
@@ -3207,6 +3229,8 @@ function updateGameOverUI(title) {
   rewardChoosing = false;
   hideOverlayPanels();
   resultPanel.classList.remove("hidden");
+  ensureGameOverTitleButton();
+  resultActions?.classList.toggle("hidden", title !== "GAME OVER");
   overlayTitle.textContent = title;
   finalStageText.textContent = currentStage.toString();
   bestScoreText.textContent = formatNumber(recordState.highScore);
@@ -3743,6 +3767,12 @@ function returnToTitle() {
   init(true);
 }
 
+function returnGameOverToTitle() {
+  if (gameState !== GAME_STATE.GAME_OVER) return;
+  clearActiveInput();
+  init(true);
+}
+
 function endGame() {
   setGameState(GAME_STATE.GAME_OVER);
   clearActiveInput();
@@ -3810,6 +3840,7 @@ confirmExitNoButton.addEventListener("click", cancelExitConfirm);
 settingsButton.addEventListener("click", () => openTitleModal("settings"));
 howToButton.addEventListener("click", () => openTitleModal("howto"));
 titleModalClose.addEventListener("click", closeTitleModal);
-retryButton.addEventListener("click", () => init(true));
+retryButton.addEventListener("click", () => init(false));
+gameOverTitleButton?.addEventListener("click", returnGameOverToTitle);
 
 init();
