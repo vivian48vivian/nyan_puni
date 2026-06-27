@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>ぷにリンク MVP</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="phone-shell" aria-label="ぷにリンク MVP">
+      <section class="game-card">
+        <div id="titleScreen" class="title-screen">
+          <canvas id="titleCanvas" width="375" height="812" aria-label="タイトル画面のぷに"></canvas>
+          <div class="title-sparkles" aria-hidden="true"></div>
+          <div class="title-content">
+            <div class="title-logo-wrap">
+              <img class="title-logo" src="assets/ui/title-logo.png" alt="にゃんぷに">
+            </div>
+            <div class="title-menu" aria-label="タイトルメニュー">
+              <button id="playButton" class="title-button primary" type="button">PLAY</button>
+              <button id="settingsButton" class="title-button" type="button">SETTINGS</button>
+              <button id="howToButton" class="title-button" type="button">HOW TO PLAY</button>
+            </div>
+            <div class="title-best">
+              <div>
+                <span>BEST SCORE</span>
+                <strong id="titleBestScore">0</strong>
+              </div>
+              <div>
+                <span>BEST STAGE</span>
+                <strong id="titleBestStage">1</strong>
+              </div>
+            </div>
+          </div>
+          <p id="versionText" class="version-text">Version 0.9</p>
+          <div id="titleModal" class="title-modal hidden">
+            <div class="title-modal-panel">
+              <p id="titleModalTitle" class="title-modal-title">HOW TO PLAY</p>
+              <div id="titleModalBody" class="title-modal-body"></div>
+              <button id="titleModalClose" class="title-button primary small" type="button">OK</button>
+            </div>
+          </div>
+        </div>
+        <header class="top-bar">
+          <div class="stat">
+            <span class="stat-label">TIME</span>
+            <strong id="timeText">60</strong>
+          </div>
+          <div class="stat stage-stat">
+            <span class="stat-label">STAGE</span>
+            <strong id="stageText">1</strong>
+          </div>
+          <div class="stat score-stat">
+            <span class="stat-label">SCORE</span>
+            <strong id="scoreText">0</strong>
+          </div>
+          <button id="pauseButton" class="icon-button" type="button" aria-label="ポーズ">II</button>
+        </header>
+
+        <div class="play-wrap">
+          <canvas id="gameCanvas" width="375" height="600" aria-label="ぷにのプレイエリア"></canvas>
+        </div>
+
+        <footer class="bottom-bar">
+          <div class="mission-card">
+            <span class="mission-label">MISSION</span>
+            <span id="missionNotice" class="mission-notice" aria-live="polite"></span>
+            <strong>ぷにを30個消そう</strong>
+            <div class="mission-progress">
+              <span id="missionText">0 / 30</span>
+              <div class="progress-track">
+                <div id="missionFill" class="progress-fill"></div>
+              </div>
+            </div>
+            <div id="stageGoalCard" class="stage-goal-card">
+              <div id="themeText" class="theme-text">SPRING / NONE</div>
+              <div class="stage-goal-row">
+                <span id="targetText">TARGET 10000</span>
+                <span id="targetPercentText">0%</span>
+              </div>
+              <div class="stage-progress-track">
+                <div id="stageProgressFill" class="stage-progress-fill"></div>
+              </div>
+            </div>
+          </div>
+          <div class="skill-panel">
+            <div class="skill-status">
+              <span id="skillNameText">NO SKILL</span>
+              <strong id="skillLevelText">Lv0</strong>
+              <div class="skill-track">
+                <div id="skillFill" class="skill-fill"></div>
+              </div>
+            </div>
+            <div id="feverCard" class="fever-card">
+              <div class="fever-row">
+                <span>FEVER</span>
+                <strong id="feverText">0%</strong>
+              </div>
+              <div class="fever-track">
+                <div id="feverFill" class="fever-fill"></div>
+              </div>
+            </div>
+            <button class="skill-button" type="button">SKILL</button>
+          </div>
+        </footer>
+
+        <div id="overlay" class="overlay hidden">
+          <div class="overlay-panel">
+            <div id="resultPanel" class="result-panel">
+              <p id="recordText" class="record-text"></p>
+              <p id="overlayTitle" class="overlay-title">GAME OVER</p>
+              <p class="result-stage">STAGE <strong id="finalStageText">1</strong></p>
+              <p class="overlay-score">SCORE <strong id="finalScoreText">0</strong></p>
+              <div class="best-grid">
+                <span>BEST</span>
+                <strong id="bestScoreText">0</strong>
+                <span>BEST STAGE</span>
+                <strong id="bestStageText">1</strong>
+              </div>
+              <button id="retryButton" class="retry-button" type="button">RETRY</button>
+            </div>
+            <div id="rewardPanel" class="reward-panel hidden">
+              <p class="overlay-title reward-title">STAGE CLEAR!</p>
+              <p id="rewardSubtitle" class="reward-subtitle">PRESENT</p>
+              <div id="rewardOptions" class="reward-options"></div>
+            </div>
+            <div id="skillSelectPanel" class="skill-select-panel hidden">
+              <p class="overlay-title reward-title">SELECT SKILL</p>
+              <p class="reward-subtitle">Choose one for this run:</p>
+              <div id="skillOptions" class="reward-options"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
