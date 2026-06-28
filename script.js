@@ -1230,7 +1230,7 @@ function createFeverBonusPuni(value) {
   const speedMultiplier = getStageSpeedMultiplier();
   return createFloatingPiece({
     radius: value === 5 ? random(16, 19) : random(15, 18),
-    color: 0,
+    color: choosePuniColor(),
     type: "normal",
     variant: value === 5 ? "bonus5" : "bonus3",
     bonusScore: value,
@@ -2397,10 +2397,6 @@ function getPuniPalette(p) {
     return { fill: "#ffe08a", shade: "#f0a048", eye: "#20243a" };
   }
 
-  if (p.variant === "bonus3") {
-    return { fill: "#ffc9ea", shade: "#d58bdd", eye: "#20243a" };
-  }
-
   if (p.variant === "golden") {
     return { fill: "#ffd45a", shade: "#f0aa32", eye: "#20243a" };
   }
@@ -2434,7 +2430,7 @@ function createPuniBodyGradient(p, palette, radius, isSelected) {
 
   if (isFeverBonusPuni(p)) {
     bodyGradient.addColorStop(0, "#ffffff");
-    bodyGradient.addColorStop(0.22, p.variant === "bonus5" ? "#fff0b4" : "#ffd8f0");
+    bodyGradient.addColorStop(0.22, p.variant === "bonus5" ? "#fff0b4" : (isSelected ? "#ffffff" : palette.fill));
     bodyGradient.addColorStop(0.7, palette.fill);
     bodyGradient.addColorStop(1, palette.shade);
     return bodyGradient;
@@ -2859,7 +2855,7 @@ function isPathBlocked(from, to) {
 }
 
 function isWildcardPuni(p) {
-  return p.variant === "rainbow" || p.variant === "golden" || isFeverBonusPuni(p);
+  return p.variant === "rainbow" || p.variant === "golden" || p.variant === "bonus5";
 }
 
 function canJoinChain(p) {
