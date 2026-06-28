@@ -29,6 +29,11 @@ const resultPanel = document.getElementById("resultPanel");
 const rewardPanel = document.getElementById("rewardPanel");
 const rewardSubtitle = document.getElementById("rewardSubtitle");
 const rewardOptions = document.getElementById("rewardOptions");
+const timeBonusPanel = document.getElementById("timeBonusPanel");
+const bonusStageScoreText = document.getElementById("bonusStageScoreText");
+const bonusTimeLeftText = document.getElementById("bonusTimeLeftText");
+const bonusValueText = document.getElementById("bonusValueText");
+const bonusTotalScoreText = document.getElementById("bonusTotalScoreText");
 const skillSelectPanel = document.getElementById("skillSelectPanel");
 const skillOptions = document.getElementById("skillOptions");
 const pausePanel = document.getElementById("pausePanel");
@@ -507,6 +512,23 @@ class AudioManager {
     this.playSe("countdown", { frequency: 620 + number * 22, volume: 0.32 });
   }
 
+  playScoreCountTick(progress = 0) {
+    const frequency = 760 + Math.min(1, Math.max(0, progress)) * 260;
+    this.playTone({
+      frequency,
+      duration: 0.045,
+      type: "triangle",
+      volume: 0.13,
+      attack: 0.004,
+      decay: 0.045
+    });
+  }
+
+  playScoreCountComplete() {
+    this.playTone({ frequency: 1174.66, duration: 0.08, type: "sine", volume: 0.16, attack: 0.006, decay: 0.06 });
+    this.playTone({ frequency: 1567.98, duration: 0.1, type: "triangle", volume: 0.13, attack: 0.006, decay: 0.07, delay: 0.07 });
+  }
+
   playJingle(name) {
     const patterns = {
       gameStart: [523.25, 659.25, 783.99],
@@ -614,6 +636,7 @@ const GAME_CONFIG = {
   spikeCount: 3,
   missionTarget: 30,
   missionRewardSeconds: 5,
+  timeBonusPerSecond: 100,
   stageScoreBase: 9000,
   stageTargetExponent: 1.55,
   maxStage: 10,
@@ -912,6 +935,7 @@ let popParticles = [];
 let scorePopups = [];
 let chainNotices = [];
 let score = 0;
+let stageStartScore = 0;
 let removedTotal = 0;
 let timeLeft = GAME_CONFIG.baseSeconds;
 let currentStage = 1;
@@ -933,6 +957,8 @@ let rewardChoices = [];
 let rewardChoosing = false;
 let rewardPresentTimer = 0;
 let rewardNextStage = 0;
+let rewardPhase = "present";
+let stageClearBonus = null;
 let titleActive = true;
 let titleStarting = false;
 let titlePuni = [];
@@ -975,6 +1001,7 @@ function init(showTitle = true) {
   }
 
   score = 0;
+  stageStartScore = 0;
   removedTotal = 0;
   timeLeft = GAME_CONFIG.baseSeconds;
   currentStage = 1;
@@ -995,6 +1022,8 @@ function init(showTitle = true) {
   rewardChoosing = false;
   rewardPresentTimer = 0;
   rewardNextStage = 0;
+  rewardPhase = "present";
+  stageClearBonus = null;
   titleActive = showTitle;
   titleStarting = false;
   selectedSkillId = null;
@@ -1035,6 +1064,7 @@ function init(showTitle = true) {
   resultPanel.classList.add("hidden");
   resultActions?.classList.add("hidden");
   rewardPanel.classList.add("hidden");
+  timeBonusPanel.classList.add("hidden");
   skillSelectPanel.classList.toggle("hidden", showTitle);
   pausePanel.classList.add("hidden");
   confirmExitPanel.classList.add("hidden");
@@ -1082,6 +1112,7 @@ function setGameState(nextState) {
 function hideOverlayPanels() {
   resultPanel.classList.add("hidden");
   rewardPanel.classList.add("hidden");
+  timeBonusPanel.classList.add("hidden");
   skillSelectPanel.classList.add("hidden");
   pausePanel.classList.add("hidden");
   confirmExitPanel.classList.add("hidden");
@@ -3351,17 +3382,18 @@ function checkStageClear() {
   if (score < getStageScoreTarget(currentStage)) return;
 
   if (currentStage >= GAME_CONFIG.maxStage) {
-    showAllClear();
+    showStageClearBonus(0);
     return;
   }
 
-  showRewardPresent(currentStage + 1);
+  showStageClearBonus(currentStage + 1);
 }
 
 function startStageTransition(nextStage) {
   setGameState(GAME_STATE.READY);
   const extraSeconds = Math.min(5, playerUpgrades.nextStageExtraSeconds);
   currentStage = nextStage;
+  stageStartScore = score;
   timeLeft = GAME_CONFIG.baseSeconds + extraSeconds;
   lastCountdownSecond = null;
   timeupBgmActive = false;
@@ -3389,16 +3421,33 @@ function startStageTransition(nextStage) {
   updateHud();
 }
 
-function showRewardPresent(nextStage) {
+function showStageClearBonus(nextStage) {
   setGameState(GAME_STATE.REWARD);
   rewardNextStage = nextStage;
-  const reward = getRandomReward();
-  rewardChoices = [reward];
   resetStageRewards();
-  applyReward(reward.id);
   resetFeverState();
   clearActiveInput();
-  rewardPresentTimer = 2.4;
+  const timeLeftSeconds = Math.floor(Math.max(0, timeLeft));
+  const bonusScore = timeLeftSeconds * GAME_CONFIG.timeBonusPerSecond;
+  const stageScore = Math.max(0, score - stageStartScore);
+  const scoreBeforeBonus = score;
+  score += bonusScore;
+  stageClearBonus = {
+    stageScore,
+    timeLeftSeconds,
+    bonusScore,
+    scoreBeforeBonus,
+    totalScore: score,
+    timer: 0,
+    countDuration: 1.15,
+    holdDuration: 2.35,
+    tickTimer: 0,
+    tickInterval: 0.085,
+    completeSoundPlayed: false
+  };
+  rewardPhase = "bonus";
+  rewardChoices = [];
+  rewardPresentTimer = 0;
   screenFlash = 1.3;
   timeupBgmActive = false;
   audio.playStageClear();
@@ -3410,7 +3459,27 @@ function showRewardPresent(nextStage) {
   rewardPanel.classList.remove("hidden");
   overlay.classList.remove("pause-overlay");
   overlay.classList.remove("hidden");
+  rewardSubtitle.textContent = "TIME BONUS";
+  rewardOptions.innerHTML = "";
+  timeBonusPanel.classList.remove("hidden");
+  renderTimeBonus(0);
+  updateHud();
+}
+
+function showRewardPresent(nextStage) {
+  if (nextStage <= 0) {
+    showAllClear();
+    return;
+  }
+
+  rewardPhase = "present";
+  rewardNextStage = nextStage;
+  const reward = getRandomReward();
+  rewardChoices = [reward];
+  applyReward(reward.id);
+  rewardPresentTimer = 2.4;
   rewardSubtitle.textContent = "PRESENT";
+  timeBonusPanel.classList.add("hidden");
   rewardOptions.innerHTML = "";
 
   const card = document.createElement("div");
@@ -3421,6 +3490,11 @@ function showRewardPresent(nextStage) {
 
 function updateRewardPresent(dt) {
   if (!rewardChoosing) return;
+
+  if (rewardPhase === "bonus") {
+    updateStageClearBonus(dt);
+    return;
+  }
 
   rewardPresentTimer = Math.max(0, rewardPresentTimer - dt);
   if (rewardPresentTimer > 0) return;
@@ -3433,6 +3507,50 @@ function updateRewardPresent(dt) {
   rewardOptions.innerHTML = "";
   startStageTransition(rewardNextStage);
   rewardNextStage = 0;
+}
+
+function updateStageClearBonus(dt) {
+  if (!stageClearBonus) return;
+
+  stageClearBonus.timer += dt;
+  const progress = Math.min(1, stageClearBonus.timer / stageClearBonus.countDuration);
+  renderTimeBonus(progress);
+  updateStageClearBonusSound(dt, progress);
+
+  if (stageClearBonus.timer < stageClearBonus.holdDuration) return;
+
+  showRewardPresent(rewardNextStage);
+}
+
+function updateStageClearBonusSound(dt, progress) {
+  if (!stageClearBonus || stageClearBonus.bonusScore <= 0) return;
+
+  if (progress < 1) {
+    stageClearBonus.tickTimer += dt;
+    if (stageClearBonus.tickTimer >= stageClearBonus.tickInterval) {
+      stageClearBonus.tickTimer = 0;
+      audio.playScoreCountTick(progress);
+    }
+    return;
+  }
+
+  if (!stageClearBonus.completeSoundPlayed) {
+    stageClearBonus.completeSoundPlayed = true;
+    audio.playScoreCountComplete();
+  }
+}
+
+function renderTimeBonus(progress) {
+  if (!stageClearBonus) return;
+
+  const easedProgress = 1 - Math.pow(1 - progress, 3);
+  const visibleBonus = Math.floor(stageClearBonus.bonusScore * easedProgress);
+  const visibleTotal = stageClearBonus.scoreBeforeBonus + visibleBonus;
+
+  bonusStageScoreText.textContent = formatNumber(stageClearBonus.stageScore);
+  bonusTimeLeftText.textContent = `${stageClearBonus.timeLeftSeconds}s`;
+  bonusValueText.textContent = `+${formatNumber(visibleBonus)}`;
+  bonusTotalScoreText.textContent = formatNumber(visibleTotal);
 }
 
 function getRandomReward() {

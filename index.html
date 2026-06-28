@@ -125,6 +125,24 @@
             <div id="rewardPanel" class="reward-panel hidden">
               <p class="overlay-title reward-title">STAGE CLEAR!</p>
               <p id="rewardSubtitle" class="reward-subtitle">PRESENT</p>
+              <div id="timeBonusPanel" class="time-bonus-panel hidden" aria-live="polite">
+                <div class="time-bonus-row">
+                  <span>STAGE SCORE</span>
+                  <strong id="bonusStageScoreText">0</strong>
+                </div>
+                <div class="time-bonus-row">
+                  <span>TIME LEFT</span>
+                  <strong id="bonusTimeLeftText">0s</strong>
+                </div>
+                <div class="time-bonus-row bonus">
+                  <span>TIME BONUS</span>
+                  <strong id="bonusValueText">+0</strong>
+                </div>
+                <div class="time-bonus-row total">
+                  <span>TOTAL SCORE</span>
+                  <strong id="bonusTotalScoreText">0</strong>
+                </div>
+              </div>
               <div id="rewardOptions" class="reward-options"></div>
             </div>
             <div id="skillSelectPanel" class="skill-select-panel hidden">
