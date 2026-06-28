@@ -7,6 +7,7 @@
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
+  --app-height: 100svh;
   --theme-bg-a: #fdf3f8;
   --theme-bg-b: #e9f9ff;
   --theme-bg-c: #f2fff1;
@@ -33,7 +34,7 @@ body {
   display: grid;
   min-height: 100vh;
   min-height: 100svh;
-  min-height: 100dvh;
+  min-height: var(--app-height);
   place-items: center;
   overflow: hidden;
   background:
@@ -53,10 +54,11 @@ button {
   width: min(100vw, 430px);
   height: 100vh;
   height: 100svh;
-  height: 100dvh;
+  height: var(--app-height);
   max-height: 900px;
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-items: start;
   padding:
     calc(14px + var(--safe-area-top))
     calc(14px + var(--safe-area-right))
@@ -1039,7 +1041,11 @@ button {
 
 @media (max-height: 680px) {
   .phone-shell {
-    padding: 8px;
+    padding:
+      calc(8px + var(--safe-area-top))
+      calc(8px + var(--safe-area-right))
+      calc(8px + var(--safe-area-bottom))
+      calc(8px + var(--safe-area-left));
   }
 
   .title-content {

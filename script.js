@@ -1169,6 +1169,11 @@ function resizeTitleCanvas() {
   titleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+function updateViewportHeight() {
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
+}
+
 function ensureGameOverTitleButton() {
   if (gameOverTitleButton) {
     gameOverTitleButton.onclick = returnGameOverToTitle;
@@ -4132,13 +4137,18 @@ function getAllPieces() {
   return puni.concat(spikes);
 }
 
-window.addEventListener("resize", () => {
+function handleViewportResize() {
+  updateViewportHeight();
   resizeCanvas();
   resizeTitleCanvas();
   if (titleActive) {
     createTitlePuni();
   }
-});
+}
+
+window.addEventListener("resize", handleViewportResize);
+window.visualViewport?.addEventListener("resize", handleViewportResize);
+window.visualViewport?.addEventListener("scroll", handleViewportResize);
 titleCanvas.addEventListener("pointerdown", handleTitlePointerDown);
 titleCanvas.addEventListener("mousedown", handleTitlePointerDown);
 canvas.addEventListener("pointerdown", pointerDown);
@@ -4161,4 +4171,5 @@ titleModalClose.addEventListener("click", closeTitleModal);
 retryButton.addEventListener("click", () => init(false));
 ensureGameOverTitleButton();
 
+updateViewportHeight();
 init();
