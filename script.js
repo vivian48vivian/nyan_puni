@@ -643,6 +643,21 @@ const GAME_CONFIG = {
   fever: {
     duration: 10,
     scoreMultiplier: 1.5,
+    bonusSpawnStopSeconds: 3,
+    bonus3: {
+      score: 3,
+      minCount: 2,
+      maxCount: 3,
+      refillInterval: 0.7,
+      extraChance: 0.42
+    },
+    bonus5: {
+      score: 5,
+      extraSpawnInterval: 1.2,
+      extraChance: 0.08,
+      maxCount: 2
+    },
+    colorBiasChance: 0.24,
     gainByChain: {
       small: 10,
       medium: 18,
@@ -951,6 +966,8 @@ let feverGauge = 0;
 let feverActive = false;
 let feverTimer = 0;
 let feverNoticeTimer = 0;
+let feverBonus3SpawnTimer = 0;
+let feverBonus5SpawnTimer = 0;
 let highScoreData = { highScore: 0, highStage: 1 };
 let playerUpgrades = createDefaultUpgrades();
 let rewardChoices = [];
@@ -1016,6 +1033,8 @@ function init(showTitle = true) {
   feverActive = false;
   feverTimer = 0;
   feverNoticeTimer = 0;
+  feverBonus3SpawnTimer = 0;
+  feverBonus5SpawnTimer = 0;
   highScoreData = loadHighScore();
   playerUpgrades = createDefaultUpgrades();
   rewardChoices = [];
@@ -1179,7 +1198,7 @@ function createPuni() {
   const variantSpeed = variant === "golden" ? goldenConfig.spawnSpeedMultiplier : 1;
   const piece = createFloatingPiece({
     radius: variant === "golden" ? random(goldenConfig.radiusMin, goldenConfig.radiusMax) : radius,
-    color: variant === "normal" ? Math.floor(Math.random() * COLORS.length) : 0,
+    color: variant === "normal" ? choosePuniColor() : 0,
     type: "normal",
     variant,
     speedMin: 11 * speedMultiplier * variantSpeed,
@@ -1192,6 +1211,27 @@ function createPuni() {
   }
 
   return piece;
+}
+
+function choosePuniColor() {
+  if (feverActive && Math.random() < GAME_CONFIG.fever.colorBiasChance) {
+    return getMostCommonPuniColor();
+  }
+
+  return Math.floor(Math.random() * COLORS.length);
+}
+
+function createFeverBonusPuni(value) {
+  const speedMultiplier = getStageSpeedMultiplier();
+  return createFloatingPiece({
+    radius: value === 5 ? random(16, 19) : random(15, 18),
+    color: 0,
+    type: "normal",
+    variant: value === 5 ? "bonus5" : "bonus3",
+    bonusScore: value,
+    speedMin: 10 * speedMultiplier,
+    speedMax: 21 * speedMultiplier
+  });
 }
 
 function createDefaultUpgrades() {
@@ -1254,6 +1294,7 @@ function createFloatingPiece(options) {
     color: options.color,
     type: options.type,
     variant: options.variant || "normal",
+    bonusScore: options.bonusScore || 0,
     wobble: random(0, Math.PI * 2),
     scale: 1,
     alpha: 1,
@@ -1631,10 +1672,51 @@ function updatePuni(dt) {
   repelSpikesFromPuni(dt);
   puni = puni.filter((p) => p.alpha > 0.02);
 
-  while (puni.length < GAME_CONFIG.targetCount) {
+  while (getNonBonusPuniCount() < GAME_CONFIG.targetCount) {
     puni.push(createPuni());
   }
+  updateFeverBonusPuni(dt);
   updateBoardSafety(dt);
+}
+
+function updateFeverBonusPuni(dt) {
+  if (!feverActive || feverTimer <= GAME_CONFIG.fever.bonusSpawnStopSeconds) return;
+
+  feverBonus3SpawnTimer -= dt;
+  feverBonus5SpawnTimer -= dt;
+
+  if (feverBonus3SpawnTimer <= 0) {
+    const bonus3 = GAME_CONFIG.fever.bonus3;
+    let count = getFeverBonusCount(3);
+    while (count < bonus3.minCount) {
+      puni.push(createFeverBonusPuni(3));
+      count += 1;
+    }
+    if (count < bonus3.maxCount && Math.random() < bonus3.extraChance) {
+      puni.push(createFeverBonusPuni(3));
+    }
+    feverBonus3SpawnTimer = bonus3.refillInterval;
+  }
+
+  if (feverBonus5SpawnTimer <= 0) {
+    const bonus5 = GAME_CONFIG.fever.bonus5;
+    if (getFeverBonusCount(5) < bonus5.maxCount && Math.random() < bonus5.extraChance) {
+      puni.push(createFeverBonusPuni(5));
+    }
+    feverBonus5SpawnTimer = bonus5.extraSpawnInterval;
+  }
+}
+
+function getNonBonusPuniCount() {
+  return puni.filter((p) => !isFeverBonusPuni(p)).length;
+}
+
+function getFeverBonusCount(value) {
+  return puni.filter((p) => !p.removing && p.bonusScore === value).length;
+}
+
+function isFeverBonusPuni(p) {
+  return p.variant === "bonus3" || p.variant === "bonus5";
 }
 
 function applyStageGimmick(dt) {
@@ -2136,6 +2218,10 @@ function drawPuni(p, isSelected, isParent) {
     drawGoldenPuniStar(ctx, radius);
   }
 
+  if (isFeverBonusPuni(p)) {
+    drawFeverBonusLabel(ctx, p, radius);
+  }
+
   if (isSelected) {
     ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
     ctx.lineWidth = 4;
@@ -2206,6 +2292,20 @@ function drawGoldenPuniStar(renderCtx, radius) {
   }
   renderCtx.closePath();
   renderCtx.fill();
+  renderCtx.restore();
+}
+
+function drawFeverBonusLabel(renderCtx, p, radius) {
+  const label = `+${p.bonusScore}`;
+  renderCtx.save();
+  renderCtx.textAlign = "center";
+  renderCtx.textBaseline = "middle";
+  renderCtx.font = `900 ${Math.max(15, radius * 0.8)}px system-ui, sans-serif`;
+  renderCtx.lineWidth = Math.max(3, radius * 0.18);
+  renderCtx.strokeStyle = "rgba(255, 255, 255, 0.94)";
+  renderCtx.strokeText(label, 0, radius * 0.18);
+  renderCtx.fillStyle = p.bonusScore === 5 ? "#f0a048" : "#d58bdd";
+  renderCtx.fillText(label, 0, radius * 0.18);
   renderCtx.restore();
 }
 
@@ -2288,6 +2388,14 @@ function drawSpike(spike) {
 }
 
 function getPuniPalette(p) {
+  if (p.variant === "bonus5") {
+    return { fill: "#ffe08a", shade: "#f0a048", eye: "#20243a" };
+  }
+
+  if (p.variant === "bonus3") {
+    return { fill: "#ffc9ea", shade: "#d58bdd", eye: "#20243a" };
+  }
+
   if (p.variant === "golden") {
     return { fill: "#ffd45a", shade: "#f0aa32", eye: "#20243a" };
   }
@@ -2316,6 +2424,14 @@ function createPuniBodyGradient(p, palette, radius, isSelected) {
     bodyGradient.addColorStop(0.66, "#ffe88d");
     bodyGradient.addColorStop(0.84, "#9fcaff");
     bodyGradient.addColorStop(1, "#dfa8ff");
+    return bodyGradient;
+  }
+
+  if (isFeverBonusPuni(p)) {
+    bodyGradient.addColorStop(0, "#ffffff");
+    bodyGradient.addColorStop(0.22, p.variant === "bonus5" ? "#fff0b4" : "#ffd8f0");
+    bodyGradient.addColorStop(0.7, palette.fill);
+    bodyGradient.addColorStop(1, palette.shade);
     return bodyGradient;
   }
 
@@ -2738,7 +2854,7 @@ function isPathBlocked(from, to) {
 }
 
 function isWildcardPuni(p) {
-  return p.variant === "rainbow" || p.variant === "golden";
+  return p.variant === "rainbow" || p.variant === "golden" || isFeverBonusPuni(p);
 }
 
 function canJoinChain(p) {
@@ -2801,8 +2917,9 @@ function failChain(point = pointer, hitSpike = null) {
 
 function removeSelected() {
   const count = selected.length;
+  const chainCount = getEffectiveChainCount(selected);
   const hadGolden = selected.some((p) => p.variant === "golden");
-  const gainedScore = calculateScore(count);
+  const gainedScore = calculateScore(chainCount);
   const popupPoint = getSelectedCenter();
 
   for (const p of selected) {
@@ -2812,16 +2929,23 @@ function removeSelected() {
   }
 
   addScore(gainedScore);
-  addFeverGauge(count);
-  addSkillGauge(count);
-  audio.playChainPop(count);
+  addFeverGauge(chainCount);
+  addSkillGauge(chainCount);
+  audio.playChainPop(chainCount);
   if (hadGolden) audio.playSe("goldenGet");
   createScorePopup(gainedScore, popupPoint);
-  createChainNotice(count);
+  createChainNotice(chainCount);
   removedTotal += count;
   checkMissionReward();
   updateHud();
   checkStageClear();
+}
+
+function getEffectiveChainCount(items) {
+  return items.reduce((total, p) => {
+    const chainValue = feverActive && isFeverBonusPuni(p) ? p.bonusScore : 1;
+    return total + chainValue;
+  }, 0);
 }
 
 function calculateScore(count) {
@@ -2873,6 +2997,9 @@ function startFever() {
   feverTimer = GAME_CONFIG.fever.duration;
   feverGauge = 100;
   feverNoticeTimer = 1.4;
+  feverBonus3SpawnTimer = 0;
+  feverBonus5SpawnTimer = GAME_CONFIG.fever.bonus5.extraSpawnInterval;
+  puni.push(createFeverBonusPuni(5));
   screenFlash = Math.max(screenFlash, 1.2);
   audio.playFeverBgm();
   audio.playFeverStartSequence();
@@ -2909,6 +3036,9 @@ function endFever() {
   feverTimer = 0;
   feverGauge = 0;
   feverNoticeTimer = 0;
+  feverBonus3SpawnTimer = 0;
+  feverBonus5SpawnTimer = 0;
+  removeFeverBonusPuni();
   if (timeupBgmActive || timeLeft <= 5) {
     timeupBgmActive = timeLeft > 0;
     if (timeupBgmActive) audio.playTimeupBgm();
@@ -2924,7 +3054,32 @@ function resetFeverState() {
   feverTimer = 0;
   feverGauge = 0;
   feverNoticeTimer = 0;
+  feverBonus3SpawnTimer = 0;
+  feverBonus5SpawnTimer = 0;
+  removeFeverBonusPuni(true);
   updateFeverUI();
+}
+
+function removeFeverBonusPuni(instant = false) {
+  for (const p of puni) {
+    if (!isFeverBonusPuni(p)) continue;
+    p.removing = true;
+    p.vx = 0;
+    p.vy = 0;
+    if (instant) {
+      p.alpha = 0;
+      p.scale = 0;
+    }
+  }
+
+  if (selected.some(isFeverBonusPuni)) {
+    selected = selected.filter((p) => !isFeverBonusPuni(p));
+    if (selected.length === 0) {
+      selectedColor = null;
+      pointer = null;
+      lastPointer = null;
+    }
+  }
 }
 
 function updateHud() {
@@ -3095,7 +3250,7 @@ function activateColorShift(level, targetColor) {
 }
 
 function activateAllClear(level) {
-  const eligible = puni.filter((p) => !p.removing);
+  const eligible = puni.filter((p) => !p.removing && !isFeverBonusPuni(p));
   const ratio = GAME_CONFIG.skill.allClearRatiosByLevel[level] || 0.5;
   const count = Math.ceil(eligible.length * ratio);
   const targets = shuffleArray(eligible).slice(0, count);
